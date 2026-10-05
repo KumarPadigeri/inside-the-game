@@ -42,6 +42,7 @@ Rules:
 - Every sentence (and the headline) must cite the numbers of the findings it
   relies on in finding_ids. A sentence with no supporting finding is not allowed.
 - Refer to players by their ids exactly as given (e.g. H9).
+- When giving a score, make clear which team leads (e.g. "put the visitors 2-1 up").
 """
 
 

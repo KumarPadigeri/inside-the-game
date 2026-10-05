@@ -11,6 +11,7 @@ from inside_the_game.verifier import (
     feedback_for,
     finalize,
     normalize_verdicts,
+    rejections_for,
 )
 
 MATCH = generate_match(5)
@@ -73,3 +74,8 @@ def test_finalize_drops_failed_sentences_and_replaces_a_failed_headline() -> Non
     assert [s.text for s in result.recap.sentences] == ["H10 opened the scoring."]
     assert [r.text for r in result.removed] == ["Great win!", "Possession was even."]
     assert result.rewrites == 2
+
+
+def test_rejections_record_the_draft_and_problem() -> None:
+    rejections = rejections_for(RECAP, _verdicts(False, True, True), draft=1)
+    assert [(r.draft, r.text, r.problem) for r in rejections] == [(1, "Great win!", "problem 0")]

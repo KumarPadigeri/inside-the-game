@@ -15,7 +15,7 @@ Usage:
 
 import argparse
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from agent_framework import Executor, Workflow, WorkflowBuilder, WorkflowContext, WorkflowViz, handler
 from typing_extensions import Never
@@ -24,7 +24,7 @@ from inside_the_game import analyst, narrator, verifier
 from inside_the_game.analyst import AnalystReport
 from inside_the_game.generator import Match, generate_match
 from inside_the_game.narrator import STYLE_GUIDES, Recap, Style
-from inside_the_game.verifier import MAX_REWRITES, VerifiedRecap
+from inside_the_game.verifier import MAX_REWRITES, Rejection, VerifiedRecap
 
 
 @dataclass
@@ -51,6 +51,7 @@ class Draft:
     analysis: Analysis
     recap: Recap
     rewrites: int  # rewrites done so far (0 = first draft)
+    rejections: list[Rejection] = field(default_factory=list)  # history from earlier drafts
 
 
 @dataclass
@@ -60,6 +61,7 @@ class Revision:
     analysis: Analysis
     feedback: str
     rewrites: int  # number this rewrite will be
+    rejections: list[Rejection] = field(default_factory=list)  # history so far
 
 
 class AnalystExecutor(Executor):
@@ -83,7 +85,9 @@ class NarratorExecutor(Executor):
     async def rewrite(self, revision: Revision, ctx: WorkflowContext[Draft]) -> None:
         a = revision.analysis
         recap = await narrator.narrate(a.match, a.report, a.style, feedback=revision.feedback)
-        await ctx.send_message(Draft(analysis=a, recap=recap, rewrites=revision.rewrites))
+        await ctx.send_message(
+            Draft(analysis=a, recap=recap, rewrites=revision.rewrites, rejections=revision.rejections)
+        )
 
 
 class VerifierExecutor(Executor):
@@ -95,10 +99,18 @@ class VerifierExecutor(Executor):
         verdicts = await verifier.verify(match, draft.recap)
         all_supported = all(v.supported for v in verdicts)
         if not all_supported and draft.rewrites < MAX_REWRITES:
-            feedback = verifier.feedback_for(draft.recap, verdicts)
-            await ctx.send_message(Revision(analysis=draft.analysis, feedback=feedback, rewrites=draft.rewrites + 1))
+            await ctx.send_message(
+                Revision(
+                    analysis=draft.analysis,
+                    feedback=verifier.feedback_for(draft.recap, verdicts),
+                    rewrites=draft.rewrites + 1,
+                    rejections=draft.rejections + verifier.rejections_for(draft.recap, verdicts, draft.rewrites),
+                )
+            )
         else:
-            await ctx.yield_output(verifier.finalize(match, draft.recap, verdicts, draft.rewrites))
+            await ctx.yield_output(
+                verifier.finalize(match, draft.recap, verdicts, draft.rewrites, draft.rejections)
+            )
 
 
 def build_workflow() -> Workflow:
@@ -151,6 +163,8 @@ def main() -> None:
     for sentence in recap.sentences:
         print(f"{sentence.text}\n    events {sentence.event_ids}  tools {sentence.tools}")
     print(f"\nRewrites: {result.rewrites}")
+    for rejection in result.rejections:
+        print(f"Rejected in draft {rejection.draft}: {rejection.text!r}\n    because: {rejection.problem}")
     for removed in result.removed:
         print(f"Removed: {removed.text!r}\n    because: {removed.problem}")
 

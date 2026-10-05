@@ -27,30 +27,42 @@ from inside_the_game.narrator import Recap, RecapSentence
 MAX_REWRITES = 2
 
 INSTRUCTIONS = """\
-You are a strict football fact-checker. For each numbered sentence of a match
+You are a careful football fact-checker. For each numbered sentence of a match
 recap you get the evidence linked to it: tool results and match events.
 
-Mark a sentence supported only if every factual detail in it (teams, players,
-minutes, scores, counts, percentages, order of events, how a goal or attack
-happened) is directly shown by ITS OWN evidence. Do not use evidence from
-other sentences or outside knowledge.
+For each sentence, first write your reasoning: list every factual detail in
+it (teams, players, minutes, scores, counts, percentages, order of events,
+how a goal or attack happened) and check each one against ITS OWN evidence.
+Only then decide. Do not use evidence from other sentences or outside knowledge.
 
-Style and emotion are fine ("a thrilling win", "they never gave up") as long
-as they do not state or imply a fact that the evidence contradicts or lacks.
-Mild interpretation is fine when the numbers clearly back it ("dominated
-possession" with 65%), but not when they don't ("dominated" with 51%).
+A sentence is UNSUPPORTED only if a factual detail is wrong, or is not shown
+by its evidence. Check every number against the full tool result: if a tool
+lists five counterattacks, "three counterattacks" is wrong.
+
+These are fine and must NOT be rejected:
+- Style and emotion ("a thrilling win", "they never gave up").
+- Ordinary football phrasing that follows directly from the facts: "equaliser"
+  when the goal made the score level, "won it" or "settled it" for the goal
+  that made the final score, "turned it around" for going from behind to ahead.
+- Scores from either team's point of view: "the visitors led 2-1" is the same
+  as a 1-2 score in Home-Away order.
+- Mild interpretation that the numbers clearly back ("dominated possession"
+  with 65%), but not when they don't ("dominated" with 51%).
 
 Event fields: x and y are 0-100; x is measured from the acting team's own
 goal (0) toward the goal it attacks (100), so x < 50 is the team's own half.
-minute counts from 0; the second half starts at minute 45.
+minute counts from 0; the second half starts at minute 45. Goal scores in
+tool results (score_after) are in Home-Away order.
 
-For an unsupported sentence, say exactly what is wrong and what the evidence
-actually shows.
+For an unsupported sentence, state in "problem" exactly what is wrong and what
+the evidence actually shows.
 """
 
 
 class SentenceVerdict(BaseModel):
+    # Field order matters: the model writes its reasoning before deciding.
     sentence: int = Field(description="The sentence number (0 = headline).")
+    reasoning: str = Field(default="", description="Each factual detail checked against the evidence.")
     supported: bool
     problem: str = Field(default="", description="If unsupported: what is wrong and what the evidence shows.")
 
@@ -64,11 +76,20 @@ class RemovedSentence(BaseModel):
     problem: str
 
 
+class Rejection(BaseModel):
+    """A sentence the Verifier sent back to the Narrator."""
+
+    draft: int  # 0 = first draft, 1 = first rewrite, ...
+    text: str
+    problem: str
+
+
 class VerifiedRecap(BaseModel):
     """The workflow's final output: a recap where every sentence passed the Verifier."""
 
     recap: Recap
     rewrites: int  # how many times the Narrator had to rewrite
+    rejections: list[Rejection]  # what the Verifier sent back along the way
     removed: list[RemovedSentence]  # sentences still unsupported after the last rewrite
 
 
@@ -111,7 +132,21 @@ def feedback_for(recap: Recap, verdicts: list[SentenceVerdict]) -> str:
     )
 
 
-def finalize(match: Match, recap: Recap, verdicts: list[SentenceVerdict], rewrites: int) -> VerifiedRecap:
+def rejections_for(recap: Recap, verdicts: list[SentenceVerdict], draft: int) -> list[Rejection]:
+    """The unsupported sentences of one draft, to keep as rewrite history."""
+    sentences = numbered_sentences(recap)
+    return [
+        Rejection(draft=draft, text=sentences[v.sentence].text, problem=v.problem) for v in verdicts if not v.supported
+    ]
+
+
+def finalize(
+    match: Match,
+    recap: Recap,
+    verdicts: list[SentenceVerdict],
+    rewrites: int,
+    rejections: list[Rejection] | None = None,
+) -> VerifiedRecap:
     """Keep only supported sentences. A failed headline becomes the plain scoreline."""
     removed: list[RemovedSentence] = []
     headline = recap.headline
@@ -133,6 +168,7 @@ def finalize(match: Match, recap: Recap, verdicts: list[SentenceVerdict], rewrit
     return VerifiedRecap(
         recap=Recap(style=recap.style, headline=headline, sentences=kept),
         rewrites=rewrites,
+        rejections=rejections or [],
         removed=removed,
     )
 

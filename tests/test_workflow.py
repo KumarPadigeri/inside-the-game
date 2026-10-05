@@ -47,6 +47,7 @@ def test_approved_first_draft_needs_no_rewrite(monkeypatch: pytest.MonkeyPatch) 
     assert calls == ["analyse", "narrate", "verify"]
     assert result.rewrites == 0
     assert result.removed == []
+    assert result.rejections == []
     assert result.recap.headline.text == "Draft 1."
 
 
@@ -56,6 +57,7 @@ def test_rejected_draft_goes_back_to_the_narrator(monkeypatch: pytest.MonkeyPatc
     assert calls == ["analyse", "narrate", "verify", "rewrite", "verify"]
     assert result.rewrites == 1
     assert result.recap.sentences[0].text == "Draft 2."
+    assert [(r.draft, r.text) for r in result.rejections] == [(0, "Draft 1.")]
 
 
 def test_loop_stops_after_max_rewrites_and_drops_what_still_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -66,3 +68,5 @@ def test_loop_stops_after_max_rewrites_and_drops_what_still_fails(monkeypatch: p
     assert result.rewrites == MAX_REWRITES
     assert result.recap.sentences == []
     assert [r.problem for r in result.removed] == ["wrong"]
+    # Every draft except the last was sent back; the last one's failures were removed instead.
+    assert [r.draft for r in result.rejections] == list(range(MAX_REWRITES))
