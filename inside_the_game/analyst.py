@@ -31,9 +31,12 @@ Rules:
   turning points (lead changes, comebacks), counterattacks, shots, possession.
 - Each finding is one short factual sentence. Refer to teams by their names
   and to players by their ids (e.g. H9).
-- For every finding, give the tool that proves it and the event_ids from that
-  tool's result. Copy event_ids exactly; never make them up. Possession has no
-  event_ids, so cite an empty list for possession findings.
+- For every finding, give the tool that proves it.
+- event_ids point to specific moments. Cite them only for findings about
+  particular goals, counterattacks or shots, copied exactly from the tool
+  result; never make them up. For totals, counts and percentages (the final
+  score, shot totals, possession) cite an empty list: the tool result itself
+  is the evidence.
 """
 
 
@@ -88,6 +91,23 @@ def make_analyst(match: Match, client: FoundryChatClient | None = None) -> Agent
     )
 
 
+TOOL_NAMES = ("get_match_info", "get_possession", "get_shots", "get_goals", "get_counterattacks")
+
+
+def normalize_tool_names(report: AnalystReport) -> AnalystReport:
+    """Strip namespaces the model sometimes adds ("functions.get_goals" -> "get_goals").
+
+    Raises ValueError if a finding cites a tool that does not exist.
+    """
+    findings = []
+    for finding in report.findings:
+        name = finding.tool.rsplit(".", 1)[-1]
+        if name not in TOOL_NAMES:
+            raise ValueError(f"Analyst cited an unknown tool {finding.tool!r}: {finding.claim!r}")
+        findings.append(finding.model_copy(update={"tool": name}))
+    return AnalystReport(findings=findings)
+
+
 def unknown_event_ids(report: AnalystReport, match: Match) -> set[int]:
     """event_ids cited in the report that do not exist in the match (should be empty)."""
     known = {e.event_id for e in match.events}
@@ -100,6 +120,7 @@ async def analyse(match: Match) -> AnalystReport:
     report = response.value
     if report is None:
         raise ValueError(f"Analyst returned no structured report: {response.text!r}")
+    report = normalize_tool_names(report)
     bad = unknown_event_ids(report, match)
     if bad:
         raise ValueError(f"Analyst cited event_ids that do not exist: {sorted(bad)}")

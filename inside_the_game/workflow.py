@@ -1,10 +1,13 @@
 """The recap pipeline as a Microsoft Agent Framework workflow.
 
-    RecapRequest -> [Analyst] -> Analysis -> [Narrator] -> Recap
+    RecapRequest -> [Analyst] -> Analysis -> [Narrator] -> Draft -> [Verifier] -> VerifiedRecap
+                                                 ^                      |
+                                                 +------ Revision ------+  (up to MAX_REWRITES)
 
 Each executor is one step: it receives a typed message, runs its agent, and
-sends the result along an edge (or yields the final output). Later steps
-(Verifier, Retrieval) plug in as new executors and edges.
+sends the result along an edge (or yields the final output). The Verifier
+either approves the draft, sends it back to the Narrator with the problems it
+found, or (after MAX_REWRITES) removes the sentences that still fail.
 
 Usage:
     python -m inside_the_game.workflow --seed 5 --style broadcaster
@@ -17,10 +20,11 @@ from dataclasses import dataclass
 from agent_framework import Executor, Workflow, WorkflowBuilder, WorkflowContext, WorkflowViz, handler
 from typing_extensions import Never
 
-from inside_the_game import analyst, narrator
+from inside_the_game import analyst, narrator, verifier
 from inside_the_game.analyst import AnalystReport
 from inside_the_game.generator import Match, generate_match
 from inside_the_game.narrator import STYLE_GUIDES, Recap, Style
+from inside_the_game.verifier import MAX_REWRITES, VerifiedRecap
 
 
 @dataclass
@@ -33,11 +37,29 @@ class RecapRequest:
 
 @dataclass
 class Analysis:
-    """Message from the Analyst step to the Narrator step."""
+    """Analyst -> Narrator: the findings to write about."""
 
     match: Match
     style: Style
     report: AnalystReport
+
+
+@dataclass
+class Draft:
+    """Narrator -> Verifier: a recap to fact-check."""
+
+    analysis: Analysis
+    recap: Recap
+    rewrites: int  # rewrites done so far (0 = first draft)
+
+
+@dataclass
+class Revision:
+    """Verifier -> Narrator: rewrite the recap, fixing these problems."""
+
+    analysis: Analysis
+    feedback: str
+    rewrites: int  # number this rewrite will be
 
 
 class AnalystExecutor(Executor):
@@ -50,32 +72,63 @@ class AnalystExecutor(Executor):
 
 
 class NarratorExecutor(Executor):
-    """Runs the Narrator agent and yields the finished recap."""
+    """Runs the Narrator agent: a first draft, or a rewrite after Verifier feedback."""
 
     @handler
-    async def narrate(self, analysis: Analysis, ctx: WorkflowContext[Never, Recap]) -> None:
+    async def first_draft(self, analysis: Analysis, ctx: WorkflowContext[Draft]) -> None:
         recap = await narrator.narrate(analysis.match, analysis.report, analysis.style)
-        await ctx.yield_output(recap)
+        await ctx.send_message(Draft(analysis=analysis, recap=recap, rewrites=0))
+
+    @handler
+    async def rewrite(self, revision: Revision, ctx: WorkflowContext[Draft]) -> None:
+        a = revision.analysis
+        recap = await narrator.narrate(a.match, a.report, a.style, feedback=revision.feedback)
+        await ctx.send_message(Draft(analysis=a, recap=recap, rewrites=revision.rewrites))
+
+
+class VerifierExecutor(Executor):
+    """Runs the Verifier agent: approve, send back for a rewrite, or remove what still fails."""
+
+    @handler
+    async def check(self, draft: Draft, ctx: WorkflowContext[Revision, VerifiedRecap]) -> None:
+        match = draft.analysis.match
+        verdicts = await verifier.verify(match, draft.recap)
+        all_supported = all(v.supported for v in verdicts)
+        if not all_supported and draft.rewrites < MAX_REWRITES:
+            feedback = verifier.feedback_for(draft.recap, verdicts)
+            await ctx.send_message(Revision(analysis=draft.analysis, feedback=feedback, rewrites=draft.rewrites + 1))
+        else:
+            await ctx.yield_output(verifier.finalize(match, draft.recap, verdicts, draft.rewrites))
 
 
 def build_workflow() -> Workflow:
-    """Wire the executors together: Analyst -> Narrator."""
+    """Wire the executors together, including the Verifier -> Narrator rewrite loop."""
     analyst_step = AnalystExecutor(id="analyst")
     narrator_step = NarratorExecutor(id="narrator")
-    return WorkflowBuilder(start_executor=analyst_step).add_edge(analyst_step, narrator_step).build()
+    verifier_step = VerifierExecutor(id="verifier")
+    return (
+        WorkflowBuilder(start_executor=analyst_step)
+        .add_edge(analyst_step, narrator_step)
+        .add_edge(narrator_step, verifier_step)
+        .add_edge(verifier_step, narrator_step)
+        .build()
+    )
 
 
-async def run_recap(match: Match, style: Style, verbose: bool = False) -> Recap:
-    """Run the whole pipeline for one match and return the recap."""
-    recap: Recap | None = None
+async def run_recap(match: Match, style: Style, verbose: bool = False) -> VerifiedRecap:
+    """Run the whole pipeline for one match and return the verified recap."""
+    result: VerifiedRecap | None = None
     async for event in build_workflow().run(RecapRequest(match=match, style=style), stream=True):
-        if verbose and event.type in ("executor_invoked", "executor_completed"):
-            print(f"  [{event.executor_id}] {event.type.removeprefix('executor_')}")
+        if verbose and event.type == "executor_invoked":
+            label = event.executor_id
+            if isinstance(event.data, Revision):
+                label += f" (rewrite {event.data.rewrites})"
+            print(f"  [{label}]")
         if event.type == "output":
-            recap = event.data
-    if recap is None:
+            result = event.data
+    if result is None:
         raise RuntimeError("Workflow finished without producing a recap")
-    return recap
+    return result
 
 
 def main() -> None:
@@ -92,10 +145,14 @@ def main() -> None:
     match = generate_match(args.seed)
     score = match.score()
     print(f"{match.home_team} {score['Home']}-{score['Away']} {match.away_team} ({args.style})")
-    recap = asyncio.run(run_recap(match, args.style, verbose=True))
+    result = asyncio.run(run_recap(match, args.style, verbose=True))
+    recap = result.recap
     print(f"\n# {recap.headline.text}\n")
     for sentence in recap.sentences:
-        print(f"{sentence.text}\n    events {sentence.event_ids}")
+        print(f"{sentence.text}\n    events {sentence.event_ids}  tools {sentence.tools}")
+    print(f"\nRewrites: {result.rewrites}")
+    for removed in result.removed:
+        print(f"Removed: {removed.text!r}\n    because: {removed.problem}")
 
 
 if __name__ == "__main__":

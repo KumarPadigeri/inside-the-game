@@ -58,7 +58,9 @@ class NarratorOutput(BaseModel):
 class RecapSentence(BaseModel):
     text: str
     finding_ids: list[int]
-    event_ids: list[int]  # resolved by code from the cited findings
+    # Evidence, resolved by code from the cited findings:
+    event_ids: list[int]  # specific moments (goals, counterattacks, ...)
+    tools: list[str]  # tool results backing counts and percentages
 
 
 class Recap(BaseModel):
@@ -67,27 +69,43 @@ class Recap(BaseModel):
     sentences: list[RecapSentence]
 
 
-def build_prompt(match: Match, report: AnalystReport, style: Style) -> str:
-    """The message sent to the Narrator: style, teams and numbered findings (no event_ids)."""
+def build_prompt(match: Match, report: AnalystReport, style: Style, feedback: str | None = None) -> str:
+    """The message sent to the Narrator: style, teams and numbered findings (no event_ids).
+
+    `feedback` is the Verifier's list of problems, when asking for a rewrite.
+    """
     findings = [{"id": i, "claim": f.claim} for i, f in enumerate(report.findings, start=1)]
-    return (
+    prompt = (
         f"Style: {STYLE_GUIDES[style]}\n"
         f"Home team: {match.home_team}. Away team: {match.away_team}.\n"
         f"Findings:\n{json.dumps(findings, indent=1)}"
     )
+    if feedback:
+        prompt += (
+            "\n\nA fact-checker rejected some sentences of your previous recap:\n"
+            f"{feedback}\n"
+            "Write the full recap again. Keep the sentences that passed, and fix or drop the rejected ones."
+        )
+    return prompt
 
 
 def resolve_recap(output: NarratorOutput, report: AnalystReport, style: Style) -> Recap:
-    """Attach the real event_ids to each sentence, via the findings it cites."""
+    """Attach the real evidence (event_ids and tools) to each sentence, via the findings it cites."""
 
     def resolve(sentence: NarratedSentence) -> RecapSentence:
         event_ids: set[int] = set()
+        tools: list[str] = []
         for finding_id in sentence.finding_ids:
             if not 1 <= finding_id <= len(report.findings):
                 raise ValueError(f"Sentence cites finding {finding_id}, which does not exist: {sentence.text!r}")
-            event_ids.update(report.findings[finding_id - 1].event_ids)
+            finding = report.findings[finding_id - 1]
+            event_ids.update(finding.event_ids)
+            if finding.tool not in tools:
+                tools.append(finding.tool)
         # Sorted, so the UI can show the evidence in match order.
-        return RecapSentence(text=sentence.text, finding_ids=sentence.finding_ids, event_ids=sorted(event_ids))
+        return RecapSentence(
+            text=sentence.text, finding_ids=sentence.finding_ids, event_ids=sorted(event_ids), tools=tools
+        )
 
     return Recap(
         style=style,
@@ -106,9 +124,9 @@ def make_narrator(client: FoundryChatClient | None = None) -> Agent:
     )
 
 
-async def narrate(match: Match, report: AnalystReport, style: Style) -> Recap:
+async def narrate(match: Match, report: AnalystReport, style: Style, feedback: str | None = None) -> Recap:
     """Run the Narrator and return a recap with evidence attached to every sentence."""
-    response = await make_narrator().run(build_prompt(match, report, style))
+    response = await make_narrator().run(build_prompt(match, report, style, feedback))
     output = response.value
     if output is None:
         raise ValueError(f"Narrator returned no structured recap: {response.text!r}")

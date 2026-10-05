@@ -33,8 +33,17 @@ def test_resolve_maps_findings_to_sorted_unique_event_ids() -> None:
     )
     recap = resolve_recap(output, REPORT, "fan")
     assert recap.headline.event_ids == []
+    assert recap.headline.tools == ["get_match_info"]
     assert recap.sentences[0].event_ids == [40, 41, 42]
+    assert recap.sentences[0].tools == ["get_goals", "get_counterattacks"]
     assert recap.sentences[1].event_ids == [7, 99]
+
+
+def test_prompt_includes_verifier_feedback_only_when_rewriting() -> None:
+    match = generate_match(1)
+    assert "fact-checker" not in build_prompt(match, REPORT, "fan")
+    rewrite = build_prompt(match, REPORT, "fan", feedback="Sentence 2: wrong minute.")
+    assert "fact-checker" in rewrite and "Sentence 2: wrong minute." in rewrite
 
 
 def test_resolve_rejects_a_finding_that_does_not_exist() -> None:
