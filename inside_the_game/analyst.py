@@ -59,7 +59,7 @@ def build_tools(match: Match) -> list[FunctionTool]:
         }
 
     def get_possession() -> dict[str, Any]:
-        """Possession per team as a share of all passes, with pass counts and pass accuracy (%)."""
+        """Possession per team as a share of all passes, with passes attempted, passes completed and pass accuracy (%)."""
         return dict(stats.possession(match))
 
     def get_shots() -> dict[str, Any]:

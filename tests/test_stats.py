@@ -51,8 +51,8 @@ def match() -> Match:
 def test_possession(match: Match) -> None:
     result = possession(match)
     # Home 4 passes, Away 9 passes (7 complete).
-    assert result["Home"] == {"percent": 30.8, "passes": 4, "pass_accuracy": 100.0}
-    assert result["Away"] == {"percent": 69.2, "passes": 9, "pass_accuracy": 77.8}
+    assert result["Home"] == {"percent": 30.8, "passes_attempted": 4, "passes_completed": 4, "pass_accuracy": 100.0}
+    assert result["Away"] == {"percent": 69.2, "passes_attempted": 9, "passes_completed": 7, "pass_accuracy": 77.8}
 
 
 def test_possession_percentages_add_up_to_100() -> None:
@@ -62,7 +62,7 @@ def test_possession_percentages_add_up_to_100() -> None:
 
 def test_possession_with_no_passes() -> None:
     empty = Match(match_id="empty", seed=0, home_team="A", away_team="B", events=[])
-    assert possession(empty)["Home"] == {"percent": 0.0, "passes": 0, "pass_accuracy": 0.0}
+    assert possession(empty)["Home"] == {"percent": 0.0, "passes_attempted": 0, "passes_completed": 0, "pass_accuracy": 0.0}
 
 
 def test_shots(match: Match) -> None:

@@ -21,8 +21,9 @@ COUNTER_MAX_PASSES = 4
 
 class PossessionStats(TypedDict):
     percent: float  # share of all passes in the match
-    passes: int
-    pass_accuracy: float  # percent of passes completed
+    passes_attempted: int
+    passes_completed: int
+    pass_accuracy: float  # percent of attempted passes that were completed
 
 
 class ShotStats(TypedDict):
@@ -70,14 +71,16 @@ def possession(match: Match) -> dict[Team, PossessionStats]:
     total = sum(len(p) for p in passes.values())
     home_percent = _percent(len(passes["Home"]), total)
     percents = {"Home": home_percent, "Away": round(100 - home_percent, 1) if total else 0.0}
-    return {
-        team: {
+    result: dict[Team, PossessionStats] = {}
+    for team in TEAMS:
+        completed = sum(e.outcome == "complete" for e in passes[team])
+        result[team] = {
             "percent": percents[team],
-            "passes": len(passes[team]),
-            "pass_accuracy": _percent(sum(e.outcome == "complete" for e in passes[team]), len(passes[team])),
+            "passes_attempted": len(passes[team]),
+            "passes_completed": completed,
+            "pass_accuracy": _percent(completed, len(passes[team])),
         }
-        for team in TEAMS
-    }
+    return result
 
 
 def shots(match: Match) -> dict[Team, ShotStats]:
