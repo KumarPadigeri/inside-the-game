@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from inside_the_game.analyst import AnalystReport, analyse
 from inside_the_game.foundry import make_client
 from inside_the_game.generator import Match, generate_match
+from inside_the_game.moments import SIMILAR_MOMENTS_TOOL
 
 Style = Literal["fan", "analyst", "broadcaster"]
 
@@ -42,6 +43,9 @@ Rules:
 - Every sentence (and the headline) must cite the numbers of the findings it
   relies on in finding_ids. A sentence with no supporting finding is not allowed.
 - Refer to players by their ids exactly as given (e.g. H9).
+- Findings marked "about": "other matches" compare this match with similar
+  moments elsewhere. If there are any, include at least one of them, and
+  name the other match (e.g. "as in Westfield Wanderers v Oakhurst Albion").
 - When giving a score, make clear which team leads (e.g. "put the visitors 2-1 up").
 """
 
@@ -75,7 +79,10 @@ def build_prompt(match: Match, report: AnalystReport, style: Style, feedback: st
 
     `feedback` is the Verifier's list of problems, when asking for a rewrite.
     """
-    findings = [{"id": i, "claim": f.claim} for i, f in enumerate(report.findings, start=1)]
+    findings = [
+        {"id": i, "claim": f.claim, **({"about": "other matches"} if f.tool == SIMILAR_MOMENTS_TOOL else {})}
+        for i, f in enumerate(report.findings, start=1)
+    ]
     prompt = (
         f"Style: {STYLE_GUIDES[style]}\n"
         f"Home team: {match.home_team}. Away team: {match.away_team}.\n"

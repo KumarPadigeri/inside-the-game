@@ -22,9 +22,15 @@ from pydantic import BaseModel, Field
 from inside_the_game.analyst import build_tools
 from inside_the_game.foundry import make_client
 from inside_the_game.generator import Match
+from inside_the_game.moments import SIMILAR_MOMENTS_TOOL, Comparison
 from inside_the_game.narrator import Recap, RecapSentence
 
 MAX_REWRITES = 2
+
+MISSING_COMPARISON = (
+    "The recap uses none of the comparisons with other matches. Add a sentence based on a "
+    'finding marked "about": "other matches", naming the other match.'
+)
 
 INSTRUCTIONS = """\
 You are a careful football fact-checker. For each numbered sentence of a match
@@ -48,6 +54,11 @@ These are fine and must NOT be rejected:
   as a 1-2 score in Home-Away order.
 - Mild interpretation that the numbers clearly back ("dominated possession"
   with 65%), but not when they don't ("dominated" with 51%).
+
+find_similar_moments evidence lists moments from OTHER synthetic matches
+found by similarity search. A comparison sentence is supported when the
+moments it names (match teams, minute, kind, what happened) match that
+evidence; saying the moments were "similar" or one "echoed" another is fine.
 
 Event fields: x and y are 0-100; x is measured from the acting team's own
 goal (0) toward the goal it attacks (100), so x < 50 is the team's own half.
@@ -88,6 +99,7 @@ class VerifiedRecap(BaseModel):
     """The workflow's final output: a recap where every sentence passed the Verifier."""
 
     recap: Recap
+    comparisons: list[Comparison] = []  # evidence for sentences citing find_similar_moments
     rewrites: int  # how many times the Narrator had to rewrite
     rejections: list[Rejection]  # what the Verifier sent back along the way
     removed: list[RemovedSentence]  # sentences still unsupported after the last rewrite
@@ -98,9 +110,22 @@ def numbered_sentences(recap: Recap) -> list[RecapSentence]:
     return [recap.headline, *recap.sentences]
 
 
-def build_prompt(match: Match, recap: Recap) -> str:
+def comparison_evidence(comparisons: list[Comparison]) -> list[dict[str, Any]]:
+    """The Retrieval results as evidence: this match's moment and the similar ones found."""
+    fields = {"match_id", "home_team", "away_team", "team", "kind", "minute", "score_before", "score_after", "description"}
+    return [
+        {
+            "this_match_moment": c.moment.model_dump(include=fields),
+            "similar_moments_in_other_matches": [s.model_dump(include=fields | {"similarity"}) for s in c.similar],
+        }
+        for c in comparisons
+    ]
+
+
+def build_prompt(match: Match, recap: Recap, comparisons: list[Comparison] | None = None) -> str:
     """Each sentence with only its own evidence: cited tool results and events."""
     tool_results: dict[str, Any] = {t.name: t.func() for t in build_tools(match)}
+    tool_results[SIMILAR_MOMENTS_TOOL] = comparison_evidence(comparisons or [])
     events = {e.event_id: asdict(e) for e in match.events}
     blocks = [f"Home team: {match.home_team}. Away team: {match.away_team}."]
     for number, sentence in enumerate(numbered_sentences(recap)):
@@ -132,6 +157,11 @@ def feedback_for(recap: Recap, verdicts: list[SentenceVerdict]) -> str:
     )
 
 
+def missing_comparison(recap: Recap, comparisons: list[Comparison]) -> bool:
+    """True if comparisons were available but no sentence uses one (a code check, not the LLM's)."""
+    return bool(comparisons) and not any(SIMILAR_MOMENTS_TOOL in s.tools for s in numbered_sentences(recap))
+
+
 def rejections_for(recap: Recap, verdicts: list[SentenceVerdict], draft: int) -> list[Rejection]:
     """The unsupported sentences of one draft, to keep as rewrite history."""
     sentences = numbered_sentences(recap)
@@ -146,6 +176,7 @@ def finalize(
     verdicts: list[SentenceVerdict],
     rewrites: int,
     rejections: list[Rejection] | None = None,
+    comparisons: list[Comparison] | None = None,
 ) -> VerifiedRecap:
     """Keep only supported sentences. A failed headline becomes the plain scoreline."""
     removed: list[RemovedSentence] = []
@@ -167,6 +198,7 @@ def finalize(
             removed.append(RemovedSentence(text=sentence.text, problem=verdict.problem))
     return VerifiedRecap(
         recap=Recap(style=recap.style, headline=headline, sentences=kept),
+        comparisons=comparisons or [],
         rewrites=rewrites,
         rejections=rejections or [],
         removed=removed,
@@ -183,9 +215,9 @@ def make_verifier(client: FoundryChatClient | None = None) -> Agent:
     )
 
 
-async def verify(match: Match, recap: Recap) -> list[SentenceVerdict]:
+async def verify(match: Match, recap: Recap, comparisons: list[Comparison] | None = None) -> list[SentenceVerdict]:
     """Run the Verifier and return one verdict per sentence (headline first)."""
-    response = await make_verifier().run(build_prompt(match, recap))
+    response = await make_verifier().run(build_prompt(match, recap, comparisons))
     output = response.value
     if output is None:
         raise ValueError(f"Verifier returned no structured verdicts: {response.text!r}")

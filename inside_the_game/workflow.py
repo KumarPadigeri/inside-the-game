@@ -1,13 +1,16 @@
 """The recap pipeline as a Microsoft Agent Framework workflow.
 
-    RecapRequest -> [Analyst] -> Analysis -> [Narrator] -> Draft -> [Verifier] -> VerifiedRecap
-                                                 ^                      |
-                                                 +------ Revision ------+  (up to MAX_REWRITES)
+                  +-> [Analyst] --- Analysis ---+
+    RecapRequest -+                             +-> [Narrator] -> Draft -> [Verifier] -> VerifiedRecap
+      [start]     +-> [Retrieval] - Retrieved --+        ^                      |
+                                                         +------ Revision ------+  (up to MAX_REWRITES)
 
 Each executor is one step: it receives a typed message, runs its agent, and
-sends the result along an edge (or yields the final output). The Verifier
-either approves the draft, sends it back to the Narrator with the problems it
-found, or (after MAX_REWRITES) removes the sentences that still fail.
+sends the result along an edge (or yields the final output). The Analyst and
+Retrieval agents run in parallel (fan-out); the Narrator waits for both
+(fan-in). The Verifier either approves the draft, sends it back to the
+Narrator with the problems it found, or (after MAX_REWRITES) removes the
+sentences that still fail.
 
 Usage:
     python -m inside_the_game.workflow --seed 5 --style broadcaster [--save]
@@ -15,14 +18,16 @@ Usage:
 
 import argparse
 import asyncio
+import logging
 from dataclasses import dataclass, field
 
 from agent_framework import Executor, Workflow, WorkflowBuilder, WorkflowContext, WorkflowViz, handler
 from typing_extensions import Never
 
-from inside_the_game import analyst, narrator, verifier
+from inside_the_game import analyst, narrator, retrieval, verifier
 from inside_the_game.analyst import AnalystReport
 from inside_the_game.generator import Match, generate_match
+from inside_the_game.moments import Comparison
 from inside_the_game.narrator import STYLE_GUIDES, Recap, Style
 from inside_the_game.verifier import MAX_REWRITES, Rejection, VerifiedRecap
 
@@ -37,11 +42,22 @@ class RecapRequest:
 
 @dataclass
 class Analysis:
-    """Analyst -> Narrator: the findings to write about."""
+    """Analyst -> Narrator: the findings to write about.
+
+    After fan-in, the Narrator adds the Retrieval comparisons to it.
+    """
 
     match: Match
     style: Style
     report: AnalystReport
+    comparisons: list[Comparison] = field(default_factory=list)
+
+
+@dataclass
+class Retrieved:
+    """Retrieval -> Narrator: comparisons with similar moments in other matches."""
+
+    comparisons: list[Comparison]
 
 
 @dataclass
@@ -64,6 +80,14 @@ class Revision:
     rejections: list[Rejection] = field(default_factory=list)  # history so far
 
 
+class StartExecutor(Executor):
+    """Hands the request to the Analyst and Retrieval steps at the same time."""
+
+    @handler
+    async def start(self, request: RecapRequest, ctx: WorkflowContext[RecapRequest]) -> None:
+        await ctx.send_message(request)
+
+
 class AnalystExecutor(Executor):
     """Runs the Analyst agent and passes its findings on."""
 
@@ -73,13 +97,37 @@ class AnalystExecutor(Executor):
         await ctx.send_message(Analysis(match=request.match, style=request.style, report=report))
 
 
+class RetrievalExecutor(Executor):
+    """Runs the Retrieval agent. Comparisons are optional extras: on failure, carry on without them."""
+
+    @handler
+    async def retrieve(self, request: RecapRequest, ctx: WorkflowContext[Retrieved]) -> None:
+        try:
+            comparisons = await retrieval.retrieve(request.match)
+        except Exception as error:  # noqa: BLE001 - a recap without comparisons is still a recap
+            logging.warning("Retrieval failed, continuing without comparisons: %s", error)
+            comparisons = []
+        await ctx.send_message(Retrieved(comparisons=comparisons))
+
+
 class NarratorExecutor(Executor):
     """Runs the Narrator agent: a first draft, or a rewrite after Verifier feedback."""
 
     @handler
-    async def first_draft(self, analysis: Analysis, ctx: WorkflowContext[Draft]) -> None:
-        recap = await narrator.narrate(analysis.match, analysis.report, analysis.style)
-        await ctx.send_message(Draft(analysis=analysis, recap=recap, rewrites=0))
+    async def first_draft(self, inputs: list[Analysis | Retrieved], ctx: WorkflowContext[Draft]) -> None:
+        """Fan-in: combine the Analyst's findings with the Retrieval comparisons."""
+        analysis = next(i for i in inputs if isinstance(i, Analysis))
+        comparisons = [c for i in inputs if isinstance(i, Retrieved) for c in i.comparisons]
+        combined = Analysis(
+            match=analysis.match,
+            style=analysis.style,
+            report=AnalystReport(
+                findings=analysis.report.findings + retrieval.comparisons_as_findings(comparisons)
+            ),
+            comparisons=comparisons,
+        )
+        recap = await narrator.narrate(combined.match, combined.report, combined.style)
+        await ctx.send_message(Draft(analysis=combined, recap=recap, rewrites=0))
 
     @handler
     async def rewrite(self, revision: Revision, ctx: WorkflowContext[Draft]) -> None:
@@ -96,31 +144,43 @@ class VerifierExecutor(Executor):
     @handler
     async def check(self, draft: Draft, ctx: WorkflowContext[Revision, VerifiedRecap]) -> None:
         match = draft.analysis.match
-        verdicts = await verifier.verify(match, draft.recap)
+        comparisons = draft.analysis.comparisons
+        verdicts = await verifier.verify(match, draft.recap, comparisons)
         all_supported = all(v.supported for v in verdicts)
-        if not all_supported and draft.rewrites < MAX_REWRITES:
+        missing_comparison = verifier.missing_comparison(draft.recap, comparisons)
+        if (not all_supported or missing_comparison) and draft.rewrites < MAX_REWRITES:
+            feedback = verifier.feedback_for(draft.recap, verdicts)
+            rejections = verifier.rejections_for(draft.recap, verdicts, draft.rewrites)
+            if missing_comparison:
+                feedback = "\n".join(filter(None, [feedback, f"- {verifier.MISSING_COMPARISON}"]))
+                rejections.append(
+                    Rejection(draft=draft.rewrites, text="(whole recap)", problem=verifier.MISSING_COMPARISON)
+                )
             await ctx.send_message(
                 Revision(
                     analysis=draft.analysis,
-                    feedback=verifier.feedback_for(draft.recap, verdicts),
+                    feedback=feedback,
                     rewrites=draft.rewrites + 1,
-                    rejections=draft.rejections + verifier.rejections_for(draft.recap, verdicts, draft.rewrites),
+                    rejections=draft.rejections + rejections,
                 )
             )
         else:
             await ctx.yield_output(
-                verifier.finalize(match, draft.recap, verdicts, draft.rewrites, draft.rejections)
+                verifier.finalize(match, draft.recap, verdicts, draft.rewrites, draft.rejections, comparisons)
             )
 
 
 def build_workflow() -> Workflow:
-    """Wire the executors together, including the Verifier -> Narrator rewrite loop."""
+    """Wire the executors together: fan-out, fan-in, and the Verifier -> Narrator rewrite loop."""
+    start_step = StartExecutor(id="start")
     analyst_step = AnalystExecutor(id="analyst")
+    retrieval_step = RetrievalExecutor(id="retrieval")
     narrator_step = NarratorExecutor(id="narrator")
     verifier_step = VerifierExecutor(id="verifier")
     return (
-        WorkflowBuilder(start_executor=analyst_step)
-        .add_edge(analyst_step, narrator_step)
+        WorkflowBuilder(start_executor=start_step)
+        .add_fan_out_edges(start_step, [analyst_step, retrieval_step])
+        .add_fan_in_edges([analyst_step, retrieval_step], narrator_step)
         .add_edge(narrator_step, verifier_step)
         .add_edge(verifier_step, narrator_step)
         .build()
@@ -163,7 +223,10 @@ def main() -> None:
     print(f"\n# {recap.headline.text}\n")
     for sentence in recap.sentences:
         print(f"{sentence.text}\n    events {sentence.event_ids}  tools {sentence.tools}")
-    print(f"\nRewrites: {result.rewrites}")
+    print(f"\nComparisons from Retrieval: {len(result.comparisons)}")
+    for comparison in result.comparisons:
+        print(f"  - {comparison.claim}")
+    print(f"Rewrites: {result.rewrites}")
     for rejection in result.rejections:
         print(f"Rejected in draft {rejection.draft}: {rejection.text!r}\n    because: {rejection.problem}")
     for removed in result.removed:

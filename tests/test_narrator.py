@@ -58,3 +58,14 @@ def test_resolve_rejects_a_finding_that_does_not_exist() -> None:
 def test_every_sentence_must_cite_a_finding() -> None:
     with pytest.raises(ValidationError):
         NarratedSentence(text="Pure opinion.", finding_ids=[])
+
+
+def test_prompt_marks_comparisons_with_other_matches() -> None:
+    report = AnalystReport(
+        findings=[
+            Finding(claim="Home won.", tool="get_match_info", event_ids=[]),
+            Finding(claim="Like a goal elsewhere.", tool="find_similar_moments", event_ids=[3]),
+        ]
+    )
+    prompt = build_prompt(generate_match(1), report, "fan")
+    assert prompt.count('"about": "other matches"') == 1

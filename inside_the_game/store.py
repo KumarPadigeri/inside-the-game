@@ -129,14 +129,20 @@ class Store:
             return None
 
     async def similar_moments(self, moment_id: str, top_k: int = 3) -> list[dict[str, Any]]:
-        """The top_k moments of the same kind from OTHER matches, closest to this one.
+        """The top_k moments of the same kind from OTHER matches, closest to an indexed moment."""
+        match_id = moment_id.rsplit("-p", 1)[0]
+        source = await self.moments.read_item(moment_id, partition_key=match_id)
+        return await self.similar_to(source["embedding"], kind=source["kind"], exclude_match_id=match_id, top_k=top_k)
+
+    async def similar_to(
+        self, vector: list[float], kind: str, exclude_match_id: str, top_k: int = 3
+    ) -> list[dict[str, Any]]:
+        """The top_k moments of this kind, from other matches, closest to a vector.
 
         The kind filter is exact; the vector search then ranks by how the play
         happened. Each result has the Moment fields plus "similarity" (cosine,
         1.0 = identical).
         """
-        match_id = moment_id.rsplit("-p", 1)[0]
-        source = await self.moments.read_item(moment_id, partition_key=match_id)
         query = (
             f"SELECT TOP @k {_MOMENT_FIELDS}, VectorDistance(c.embedding, @vector) AS similarity "
             "FROM c WHERE c.match_id != @match_id AND c.kind = @kind "
@@ -144,29 +150,8 @@ class Store:
         )
         parameters: list[dict[str, Any]] = [
             {"name": "@k", "value": top_k},
-            {"name": "@vector", "value": source["embedding"]},
-            {"name": "@match_id", "value": match_id},
-            {"name": "@kind", "value": source["kind"]},
+            {"name": "@vector", "value": vector},
+            {"name": "@match_id", "value": exclude_match_id},
+            {"name": "@kind", "value": kind},
         ]
         return [item async for item in self.moments.query_items(query, parameters=parameters)]
-
-
-async def upload_matches(seeds: range) -> None:
-    async with Store() as store:
-        for seed in seeds:
-            match = generate_match(seed)
-            await store.save_match(match)
-            score = match.score()
-            print(f"saved {match.match_id}: {match.home_team} {score['Home']}-{score['Away']} {match.away_team}")
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Upload synthetic matches to Cosmos DB.")
-    parser.add_argument("--count", type=int, default=5, help="number of matches")
-    parser.add_argument("--seed", type=int, default=1, help="seed of the first match")
-    args = parser.parse_args()
-    asyncio.run(upload_matches(range(args.seed, args.seed + args.count)))
-
-
-if __name__ == "__main__":
-    main()

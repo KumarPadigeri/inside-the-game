@@ -25,6 +25,9 @@ from inside_the_game.stats import COUNTER_MAX_PASSES
 
 MomentKind = Literal["goal", "counterattack", "counterattack goal"]
 
+# Name of the Retrieval tool; findings and recap sentences citing it are comparisons.
+SIMILAR_MOMENTS_TOOL = "find_similar_moments"
+
 
 class Moment(BaseModel):
     moment_id: str  # "<match_id>-p<possession_id>"
@@ -38,6 +41,21 @@ class Moment(BaseModel):
     score_after: str  # Home-Away
     description: str
     event_ids: list[int]
+
+
+class SimilarMoment(Moment):
+    """A moment from another match, as returned by vector search."""
+
+    similarity: float  # cosine similarity, 1.0 = identical
+
+
+class Comparison(BaseModel):
+    """A Retrieval claim linking a moment of this match to similar moments elsewhere."""
+
+    claim: str
+    moment: Moment  # the moment in this match
+    similar: list[SimilarMoment]  # the moments from other matches it is compared with
+    event_ids: list[int]  # this match's evidence: the moment's events
 
 
 def _phase(minute: int) -> str:
