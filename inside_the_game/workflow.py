@@ -10,7 +10,7 @@ either approves the draft, sends it back to the Narrator with the problems it
 found, or (after MAX_REWRITES) removes the sentences that still fail.
 
 Usage:
-    python -m inside_the_game.workflow --seed 5 --style broadcaster
+    python -m inside_the_game.workflow --seed 5 --style broadcaster [--save]
 """
 
 import argparse
@@ -148,6 +148,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=1, help="which synthetic match")
     parser.add_argument("--style", choices=list(STYLE_GUIDES), default="broadcaster")
     parser.add_argument("--diagram", action="store_true", help="print the workflow as a Mermaid diagram and exit")
+    parser.add_argument("--save", action="store_true", help="save the match and verified recap to Cosmos DB")
     args = parser.parse_args()
 
     if args.diagram:
@@ -167,6 +168,17 @@ def main() -> None:
         print(f"Rejected in draft {rejection.draft}: {rejection.text!r}\n    because: {rejection.problem}")
     for removed in result.removed:
         print(f"Removed: {removed.text!r}\n    because: {removed.problem}")
+
+    if args.save:
+        from inside_the_game.store import Store  # only needed (and configured) when saving
+
+        async def save() -> None:
+            async with Store() as store:
+                await store.save_match(match)
+                await store.save_recap(match.match_id, result)
+
+        asyncio.run(save())
+        print(f"\nSaved to Cosmos DB as {match.match_id}-{args.style}")
 
 
 if __name__ == "__main__":
