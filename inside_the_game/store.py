@@ -5,8 +5,8 @@ Containers (all partitioned by /match_id):
     recaps  - one document per (match, style) verified recap
     moments - goals and counterattacks with embedding vectors, for vector search
 
-Auth uses your `az login` via Entra ID; key-based access is disabled on the
-account, so there are no secrets to manage.
+Auth uses Entra ID (your `az login` locally, the managed identity in Azure);
+key-based access is disabled on the account, so there are no secrets to manage.
 
 Usage:
     python -m inside_the_game.store --count 5 --seed 1   # upload generated matches
@@ -22,9 +22,9 @@ from typing import Any
 
 from azure.cosmos.aio import ContainerProxy, CosmosClient
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
-from azure.identity.aio import AzureCliCredential
 from dotenv import load_dotenv
 
+from inside_the_game.foundry import make_async_credential
 from inside_the_game.generator import Match, generate_match
 from inside_the_game.moments import Moment
 from inside_the_game.narrator import Style
@@ -80,7 +80,7 @@ class Store:
 
     def __init__(self, endpoint: str | None = None, database: str | None = None) -> None:
         load_dotenv()
-        self._credential = AzureCliCredential()
+        self._credential = make_async_credential()
         self._client = CosmosClient(endpoint or os.environ["COSMOS_ENDPOINT"], credential=self._credential)
         db = self._client.get_database_client(database or os.environ["COSMOS_DATABASE"])
         self.matches: ContainerProxy = db.get_container_client("matches")

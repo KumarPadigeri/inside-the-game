@@ -3,6 +3,28 @@ name = "inside-the-game"
 version = "0.1.0"
 description = "Multi-agent explainable match recaps from synthetic football events"
 requires-python = ">=3.11"
+dependencies = [
+    "agent-framework-core==1.20.0",
+    "agent-framework-foundry==1.14.0",
+    "azure-identity==1.26.0",
+    "azure-cosmos==4.17.1",
+    "aiohttp==3.14.4",
+    "pydantic==2.13.5",
+    "python-dotenv==1.2.4",
+    "fastapi==0.141.1",
+    "uvicorn==0.54.0",
+    "sse-starlette==3.5.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "httpx==0.28.1"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["inside_the_game"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

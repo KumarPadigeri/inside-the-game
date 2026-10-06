@@ -19,7 +19,9 @@ Usage:
 import argparse
 import asyncio
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from typing import Literal
 
 from agent_framework import Executor, Workflow, WorkflowBuilder, WorkflowContext, WorkflowViz, handler
 from typing_extensions import Never
@@ -187,17 +189,35 @@ def build_workflow() -> Workflow:
     )
 
 
+@dataclass
+class Progress:
+    """A step starting or finishing, for live progress in the CLI and UI."""
+
+    step: str  # executor id: start, analyst, retrieval, narrator, verifier
+    status: Literal["started", "finished"]
+    detail: str = ""  # e.g. "rewrite 1"
+
+
+async def stream_recap(match: Match, style: Style) -> AsyncIterator[Progress | VerifiedRecap]:
+    """Run the pipeline, yielding Progress as steps run and the VerifiedRecap at the end."""
+    async for event in build_workflow().run(RecapRequest(match=match, style=style), stream=True):
+        if event.type == "executor_invoked":
+            detail = f"rewrite {event.data.rewrites}" if isinstance(event.data, Revision) else ""
+            yield Progress(step=event.executor_id, status="started", detail=detail)
+        elif event.type == "executor_completed":
+            yield Progress(step=event.executor_id, status="finished")
+        elif event.type == "output":
+            yield event.data
+
+
 async def run_recap(match: Match, style: Style, verbose: bool = False) -> VerifiedRecap:
     """Run the whole pipeline for one match and return the verified recap."""
     result: VerifiedRecap | None = None
-    async for event in build_workflow().run(RecapRequest(match=match, style=style), stream=True):
-        if verbose and event.type == "executor_invoked":
-            label = event.executor_id
-            if isinstance(event.data, Revision):
-                label += f" (rewrite {event.data.rewrites})"
-            print(f"  [{label}]")
-        if event.type == "output":
-            result = event.data
+    async for item in stream_recap(match, style):
+        if isinstance(item, VerifiedRecap):
+            result = item
+        elif verbose and item.status == "started":
+            print(f"  [{item.step}{f' ({item.detail})' if item.detail else ''}]")
     if result is None:
         raise RuntimeError("Workflow finished without producing a recap")
     return result
