@@ -1,8 +1,9 @@
 """Azure Cosmos DB storage for matches and verified recaps.
 
-Containers (both partitioned by /match_id):
+Containers (all partitioned by /match_id):
     matches - one document per synthetic match, events included
     recaps  - one document per (match, style) verified recap
+    moments - goals and counterattacks with embedding vectors, for vector search
 
 Auth uses your `az login` via Entra ID; key-based access is disabled on the
 account, so there are no secrets to manage.
@@ -25,6 +26,7 @@ from azure.identity.aio import AzureCliCredential
 from dotenv import load_dotenv
 
 from inside_the_game.generator import Match, generate_match
+from inside_the_game.moments import Moment
 from inside_the_game.narrator import Style
 from inside_the_game.verifier import VerifiedRecap
 
@@ -59,6 +61,14 @@ def doc_to_recap(doc: dict[str, Any]) -> VerifiedRecap:
     return VerifiedRecap.model_validate(doc)
 
 
+def moment_to_doc(moment: Moment, embedding: list[float]) -> dict[str, Any]:
+    return {"id": moment.moment_id, **moment.model_dump(), "embedding": embedding}
+
+
+# Moment fields returned by queries (everything except the large embedding).
+_MOMENT_FIELDS = ", ".join(f"c.{name}" for name in Moment.model_fields)
+
+
 # --- Cosmos DB access -------------------------------------------------------
 
 
@@ -75,6 +85,7 @@ class Store:
         db = self._client.get_database_client(database or os.environ["COSMOS_DATABASE"])
         self.matches: ContainerProxy = db.get_container_client("matches")
         self.recaps: ContainerProxy = db.get_container_client("recaps")
+        self.moments: ContainerProxy = db.get_container_client("moments")
 
     async def __aenter__(self) -> Store:
         return self
@@ -106,6 +117,38 @@ class Store:
             return doc_to_recap(doc)
         except CosmosResourceNotFoundError:
             return None
+
+    async def save_moment(self, moment: Moment, embedding: list[float]) -> None:
+        await self.moments.upsert_item(moment_to_doc(moment, embedding))
+
+    async def get_moment(self, moment_id: str) -> Moment | None:
+        match_id = moment_id.rsplit("-p", 1)[0]
+        try:
+            return Moment.model_validate(await self.moments.read_item(moment_id, partition_key=match_id))
+        except CosmosResourceNotFoundError:
+            return None
+
+    async def similar_moments(self, moment_id: str, top_k: int = 3) -> list[dict[str, Any]]:
+        """The top_k moments of the same kind from OTHER matches, closest to this one.
+
+        The kind filter is exact; the vector search then ranks by how the play
+        happened. Each result has the Moment fields plus "similarity" (cosine,
+        1.0 = identical).
+        """
+        match_id = moment_id.rsplit("-p", 1)[0]
+        source = await self.moments.read_item(moment_id, partition_key=match_id)
+        query = (
+            f"SELECT TOP @k {_MOMENT_FIELDS}, VectorDistance(c.embedding, @vector) AS similarity "
+            "FROM c WHERE c.match_id != @match_id AND c.kind = @kind "
+            "ORDER BY VectorDistance(c.embedding, @vector)"
+        )
+        parameters: list[dict[str, Any]] = [
+            {"name": "@k", "value": top_k},
+            {"name": "@vector", "value": source["embedding"]},
+            {"name": "@match_id", "value": match_id},
+            {"name": "@kind", "value": source["kind"]},
+        ]
+        return [item async for item in self.moments.query_items(query, parameters=parameters)]
 
 
 async def upload_matches(seeds: range) -> None:
