@@ -31,6 +31,8 @@ Rules:
   turning points (lead changes, comebacks), counterattacks, shots, possession.
 - Each finding is one short factual sentence. Refer to teams by their names
   and to players by their ids (e.g. H9).
+- Describe pitch positions in words ("in its own half", "high up the pitch"),
+  never as coordinates (x, y), and never mention internal ids or field names.
 - For every finding, give the tool that proves it.
 - event_ids point to specific moments. Cite them only for findings about
   particular goals, counterattacks or shots, copied exactly from the tool

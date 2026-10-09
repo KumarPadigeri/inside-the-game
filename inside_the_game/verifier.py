@@ -12,6 +12,7 @@ unverified reaches the reader.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from typing import Any
 
@@ -155,6 +156,51 @@ def feedback_for(recap: Recap, verdicts: list[SentenceVerdict]) -> str:
         for v in verdicts
         if not v.supported
     )
+
+
+MAX_SENTENCE_WORDS = 45
+
+# Internals that must never reach a reader, with the problem reported to the Narrator.
+_LEAKS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\b[xy]\s*=\s*\d"), "mentions a pitch coordinate; describe the position in words"),
+    (re.compile(r"\b(event_?ids?|possession_id|match_id|moment_id)\b", re.I), "mentions an internal field name"),
+    (re.compile(r"\bmatch_\d+"), "mentions an internal match id"),
+    (re.compile(r"\bH\b(?!\d)|\bA\b(?=\s+(?:won|lost|scored|made|had)\b)"), "uses a bare team letter instead of a player id"),
+]
+
+
+def style_problems(recap: Recap, comparisons: list[Comparison] | None = None) -> dict[int, str]:
+    """Code checks on the wording (not the facts): leaked internals, overlong sentences,
+    and comparison sentences that don't name the other match.
+
+    Returns {sentence number: problem}, with 0 = headline.
+    """
+    other_matches = {f"{s.home_team} v {s.away_team}" for c in comparisons or [] for s in c.similar}
+    problems: dict[int, str] = {}
+    for number, sentence in enumerate(numbered_sentences(recap)):
+        found = [problem for pattern, problem in _LEAKS if pattern.search(sentence.text)]
+        words = len(sentence.text.split())
+        if words > MAX_SENTENCE_WORDS:
+            found.append(f"is too long ({words} words, max {MAX_SENTENCE_WORDS}); split it or cut it down")
+        cites_comparison = SIMILAR_MOMENTS_TOOL in sentence.tools
+        if cites_comparison and other_matches and not any(m in sentence.text for m in other_matches):
+            found.append('compares with other matches without naming one; name it as "Home v Away"')
+        if found:
+            problems[number] = "Wording: the sentence " + "; ".join(found) + "."
+    return problems
+
+
+def apply_style_checks(
+    recap: Recap, verdicts: list[SentenceVerdict], comparisons: list[Comparison] | None = None
+) -> list[SentenceVerdict]:
+    """Mark sentences with wording problems as unsupported, so they go back for a rewrite."""
+    problems = style_problems(recap, comparisons)
+    return [
+        v.model_copy(update={"supported": False, "problem": " ".join(filter(None, [v.problem, problems[v.sentence]]))})
+        if v.sentence in problems
+        else v
+        for v in verdicts
+    ]
 
 
 def missing_comparison(recap: Recap, comparisons: list[Comparison]) -> bool:

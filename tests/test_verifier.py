@@ -3,15 +3,18 @@
 import json
 
 from inside_the_game.generator import generate_match
+from inside_the_game.moments import Comparison, SimilarMoment, extract_moments
 from inside_the_game.narrator import Recap, RecapSentence
 from inside_the_game.verifier import (
     SentenceVerdict,
     VerifierOutput,
+    apply_style_checks,
     build_prompt,
     feedback_for,
     finalize,
     normalize_verdicts,
     rejections_for,
+    style_problems,
 )
 
 MATCH = generate_match(5)
@@ -79,3 +82,59 @@ def test_finalize_drops_failed_sentences_and_replaces_a_failed_headline() -> Non
 def test_rejections_record_the_draft_and_problem() -> None:
     rejections = rejections_for(RECAP, _verdicts(False, True, True), draft=1)
     assert [(r.draft, r.text, r.problem) for r in rejections] == [(1, "Great win!", "problem 0")]
+
+
+def _recap_of(*texts: str) -> Recap:
+    sentences = [_sentence(t) for t in texts]
+    return Recap(style="fan", headline=sentences[0], sentences=sentences[1:])
+
+
+def test_style_checks_catch_leaked_internals() -> None:
+    recap = _recap_of(
+        "Great win!",
+        "The break started near x=41.",
+        "H won the ball and scored.",
+        "See match_005 for details.",
+        "Its event_ids prove it.",
+    )
+    problems = style_problems(recap)
+    assert sorted(problems) == [1, 2, 3, 4]
+    assert "coordinate" in problems[1]
+    assert "team letter" in problems[2]
+    assert "match id" in problems[3]
+    assert "field name" in problems[4]
+
+
+def test_style_checks_allow_normal_football_sentences() -> None:
+    recap = _recap_of(
+        "Ashvale Town edge a 3-2 thriller!",
+        "A late goal from H11 settled it in the 80th minute.",
+        "A10 scored twice for the visitors.",
+        "H9 struck after a counterattack from their own half.",
+    )
+    assert style_problems(recap) == {}
+
+
+def test_style_checks_flag_overlong_sentences() -> None:
+    long_sentence = " ".join(["word"] * 46) + "."
+    assert "too long (46 words" in style_problems(_recap_of("Fine.", long_sentence))[1]
+
+
+def test_style_problems_turn_verdicts_into_rewrites() -> None:
+    recap = _recap_of("Great win!", "Won near x=41.", "H10 opened the scoring.")
+    verdicts = apply_style_checks(recap, _verdicts(True, True, True))
+    assert [v.supported for v in verdicts] == [True, False, True]
+    assert verdicts[1].problem.startswith("Wording:")
+
+
+def test_comparison_sentences_must_name_another_match() -> None:
+    other = SimilarMoment(**extract_moments(generate_match(9))[0].model_dump(), similarity=0.9)
+    name = f"{other.home_team} v {other.away_team}"
+    moment = extract_moments(MATCH)[0]
+    comparison = Comparison(claim="Similar.", moment=moment, similar=[other], event_ids=moment.event_ids)
+    vague = _sentence("It fit a pattern seen elsewhere.", tools=["find_similar_moments"])
+    named = _sentence(f"It echoed a goal in {name}.", tools=["find_similar_moments"])
+    recap = Recap(style="fan", headline=_sentence("Great win!"), sentences=[vague, named])
+    problems = style_problems(recap, [comparison])
+    assert list(problems) == [1]
+    assert "without naming" in problems[1]

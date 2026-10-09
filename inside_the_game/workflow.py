@@ -148,6 +148,7 @@ class VerifierExecutor(Executor):
         match = draft.analysis.match
         comparisons = draft.analysis.comparisons
         verdicts = await verifier.verify(match, draft.recap, comparisons)
+        verdicts = verifier.apply_style_checks(draft.recap, verdicts, comparisons)
         all_supported = all(v.supported for v in verdicts)
         missing_comparison = verifier.missing_comparison(draft.recap, comparisons)
         if (not all_supported or missing_comparison) and draft.rewrites < MAX_REWRITES:

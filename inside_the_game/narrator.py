@@ -42,7 +42,12 @@ Rules:
   events that are not in them. Style may change the words, never the facts.
 - Every sentence (and the headline) must cite the numbers of the findings it
   relies on in finding_ids. A sentence with no supporting finding is not allowed.
-- Refer to players by their ids exactly as given (e.g. H9).
+- Refer to players by their ids exactly as given (e.g. H9), never by a bare
+  team letter ("H" or "A").
+- Never mention pitch coordinates (x, y), event or match ids, or other data
+  field names; describe positions in words ("in its own half").
+- One idea per sentence, at most 35 words. In a comparison, name at most two
+  other matches.
 - Findings marked "about": "other matches" compare this match with similar
   moments elsewhere. If there are any, include at least one of them, and
   name the other match (e.g. "as in Westfield Wanderers v Oakhurst Albion").
