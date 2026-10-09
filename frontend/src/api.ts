@@ -140,6 +140,9 @@ export const getMatch = (id: string) => getJson<Match>(`/api/matches/${id}`)
 export const getStats = (id: string) => getJson<Stats>(`/api/matches/${id}/stats`)
 export const getRecap = (id: string, style: Style) => getJson<VerifiedRecap>(`/api/matches/${id}/recaps/${style}`)
 
+/** Thrown when the server refuses to generate (missing or wrong demo passcode). */
+export class PasscodeError extends Error {}
+
 /**
  * Run the agents for a match and follow along. The backend streams Server-Sent
  * Events; EventSource only supports GET, so we read the POST response stream.
@@ -147,9 +150,17 @@ export const getRecap = (id: string, style: Style) => getJson<VerifiedRecap>(`/a
 export async function generateRecap(
   id: string,
   style: Style,
+  passcode: string,
   onProgress: (progress: Progress) => void,
 ): Promise<VerifiedRecap> {
-  const response = await fetch(`${BASE}/api/matches/${id}/recaps/${style}`, { method: 'POST' })
+  const response = await fetch(`${BASE}/api/matches/${id}/recaps/${style}`, {
+    method: 'POST',
+    headers: passcode ? { 'X-Recap-Passcode': passcode } : {},
+  })
+  if (response.status === 403) {
+    const detail = ((await response.json()) as { detail?: string }).detail
+    throw new PasscodeError(detail ?? 'Generating recaps needs the demo passcode')
+  }
   if (!response.ok || !response.body) throw new Error(`Recap failed: ${response.status}`)
 
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()

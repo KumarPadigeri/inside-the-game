@@ -8,12 +8,17 @@
     POST /api/matches/{match_id}/recaps/{style}    run the agents; streams progress
                                                    (Server-Sent Events), then saves
 
+Generating calls the AI models (it costs credit), so the POST needs the
+X-Recap-Passcode header to match RECAP_PASSCODE. Reading is open to everyone.
+Without RECAP_PASSCODE, generating is allowed locally and disabled in Azure.
+
 Usage:
     uvicorn inside_the_game.api:app --reload
 """
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
@@ -22,15 +27,30 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from typing import Any, Protocol
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
 from inside_the_game import workflow
 from inside_the_game.analyst import build_tools
+from inside_the_game.foundry import running_in_azure
 from inside_the_game.generator import Match
 from inside_the_game.narrator import Style
 from inside_the_game.verifier import VerifiedRecap
+
+
+PASSCODE_HEADER = "X-Recap-Passcode"
+
+
+def check_passcode(given: str | None) -> None:
+    """Allow generating only with the right passcode (see module docstring)."""
+    expected = os.environ.get("RECAP_PASSCODE")
+    if not expected:
+        if running_in_azure():
+            raise HTTPException(status_code=403, detail="Generating recaps is disabled on this server")
+        return  # local development
+    if not given or not hmac.compare_digest(given.encode(), expected.encode()):
+        raise HTTPException(status_code=403, detail="Generating recaps needs the demo passcode")
 
 
 class MatchStore(Protocol):
@@ -101,7 +121,13 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
         return recap
 
     @app.post("/api/matches/{match_id}/recaps/{style}")
-    async def create_recap(request: Request, match_id: str, style: Style) -> EventSourceResponse:
+    async def create_recap(
+        request: Request,
+        match_id: str,
+        style: Style,
+        passcode: str | None = Header(default=None, alias=PASSCODE_HEADER),
+    ) -> EventSourceResponse:
+        check_passcode(passcode)
         match = await require_match(request, match_id)
         store_ = get_store(request)
 

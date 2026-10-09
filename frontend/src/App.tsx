@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  PasscodeError,
   STYLES,
   generateRecap,
   getMatch,
@@ -18,6 +19,26 @@ import { Pipeline } from './components/Pipeline'
 import { FactCheckLog, RecapView } from './components/RecapView'
 import { EMPTY_PIPELINE, applyProgress, type PipelineState } from './pipelineState'
 
+const PASSCODE_KEY = 'itg-demo-passcode'
+
+// The passcode lives only in this tab (sessionStorage), which can be unavailable: never rely on it.
+function loadPasscode(): string {
+  try {
+    return sessionStorage.getItem(PASSCODE_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function savePasscode(value: string) {
+  try {
+    if (value) sessionStorage.setItem(PASSCODE_KEY, value)
+    else sessionStorage.removeItem(PASSCODE_KEY)
+  } catch {
+    // storage blocked: the passcode just won't be remembered
+  }
+}
+
 export default function App() {
   const [matches, setMatches] = useState<MatchSummary[]>([])
   const [matchId, setMatchId] = useState<string | null>(null)
@@ -29,6 +50,8 @@ export default function App() {
   const [pipeline, setPipeline] = useState<PipelineState>(EMPTY_PIPELINE)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [passcode, setPasscode] = useState(loadPasscode)
+  const [askPasscode, setAskPasscode] = useState(false)
 
   useEffect(() => {
     listMatches()
@@ -74,16 +97,27 @@ export default function App() {
     setStyle(next)
   }
 
-  async function generate() {
+  async function generate(code = passcode) {
     if (!matchId) return
+    setAskPasscode(false)
     setRunning(true)
     setError(null)
     resetView()
     try {
-      const recap = await generateRecap(matchId, style, (p) => setPipeline((state) => applyProgress(state, p)))
+      const recap = await generateRecap(matchId, style, code, (p) =>
+        setPipeline((state) => applyProgress(state, p)),
+      )
       setResult(recap)
       setSelected(recap.recap.headline)
+      savePasscode(code)
     } catch (e) {
+      if (e instanceof PasscodeError) {
+        setPasscode('')
+        savePasscode('')
+        setAskPasscode(true)
+        // Bring back the saved recap (if any) that was cleared when we started.
+        if (matchId) getRecap(matchId, style).then((r) => setResult(r)).catch(() => {})
+      }
       setError((e as Error).message)
     } finally {
       setRunning(false)
@@ -155,9 +189,37 @@ export default function App() {
                 </button>
               ))}
             </div>
-            <button type="button" className="primary" onClick={generate} disabled={running || !matchId}>
-              {running ? 'Agents at work…' : result ? 'Regenerate recap' : 'Generate recap'}
-            </button>
+            {askPasscode ? (
+              <form
+                className="passcode"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void generate(passcode)
+                }}
+              >
+                <label htmlFor="passcode">Demo passcode</label>
+                <input
+                  id="passcode"
+                  type="password"
+                  autoComplete="off"
+                  value={passcode}
+                  onChange={(e) => setPasscode(e.target.value)}
+                  autoFocus
+                />
+                <button type="submit" className="primary" disabled={!passcode}>
+                  Run agents
+                </button>
+              </form>
+            ) : (
+              <button
+                type="button"
+                className="primary"
+                onClick={() => (passcode ? void generate() : setAskPasscode(true))}
+                disabled={running || !matchId}
+              >
+                {running ? 'Agents at work…' : result ? 'Regenerate recap' : 'Generate recap'}
+              </button>
+            )}
           </section>
 
           {(running || result) && <Pipeline state={result && !running ? doneState(result.rewrites) : pipeline} />}
@@ -180,8 +242,8 @@ export default function App() {
           ) : (
             !running && (
               <p className="empty">
-                No {style} recap for this match yet. Generate one to watch the four agents work it out — it
-                takes a minute or two.
+                No {style} recap for this match yet. Generating one runs the four agents live (it takes a
+                minute or two) and needs the demo passcode.
               </p>
             )
           )}

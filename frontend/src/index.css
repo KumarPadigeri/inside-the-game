@@ -608,3 +608,27 @@ thead th {
     font-size: 1.5rem;
   }
 }
+
+/* ---- passcode ---- */
+
+.passcode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.passcode label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.passcode input {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  width: 180px;
+}

@@ -101,3 +101,30 @@ def test_create_recap_reports_errors_in_the_stream(client: TestClient, monkeypat
 
     body = client.post("/api/matches/match_005/recaps/fan").text
     assert "event: error" in body and "model unavailable" in body
+
+
+def test_generating_needs_the_passcode_when_one_is_set(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_stream(match: Match, style: Style) -> AsyncIterator[Progress | VerifiedRecap]:
+        yield RECAP
+
+    monkeypatch.setattr(workflow, "stream_recap", fake_stream)
+    monkeypatch.setenv("RECAP_PASSCODE", "open-sesame")
+    url = "/api/matches/match_005/recaps/fan"
+    assert client.post(url).status_code == 403
+    assert client.post(url, headers={"X-Recap-Passcode": "wrong"}).status_code == 403
+    response = client.post(url, headers={"X-Recap-Passcode": "open-sesame"})
+    assert response.status_code == 200 and "event: recap" in response.text
+    # Reading stays open to everyone.
+    assert client.get("/api/matches/match_005").status_code == 200
+
+
+def test_generating_is_disabled_in_azure_without_a_passcode(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("RECAP_PASSCODE", raising=False)
+    monkeypatch.setenv("CONTAINER_APP_NAME", "inside-the-game-api")
+    response = client.post("/api/matches/match_005/recaps/fan")
+    assert response.status_code == 403
+    assert "disabled" in response.json()["detail"]
