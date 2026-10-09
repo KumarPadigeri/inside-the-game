@@ -137,4 +137,14 @@ def test_comparison_sentences_must_name_another_match() -> None:
     recap = Recap(style="fan", headline=_sentence("Great win!"), sentences=[vague, named])
     problems = style_problems(recap, [comparison])
     assert list(problems) == [1]
-    assert "without naming" in problems[1]
+    assert "names none of the matches found" in problems[1]
+    assert f'"{name}"' in problems[1]  # tells the Narrator the exact valid names
+
+
+def test_comparison_with_home_and_away_swapped_is_caught() -> None:
+    other = SimilarMoment(**extract_moments(generate_match(9))[0].model_dump(), similarity=0.9)
+    moment = extract_moments(MATCH)[0]
+    comparison = Comparison(claim="Similar.", moment=moment, similar=[other], event_ids=moment.event_ids)
+    swapped = _sentence(f"As in {other.away_team} v {other.home_team}.", tools=["find_similar_moments"])
+    recap = Recap(style="fan", headline=_sentence("Great win!"), sentences=[swapped])
+    assert 1 in style_problems(recap, [comparison])

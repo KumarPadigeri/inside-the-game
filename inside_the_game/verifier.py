@@ -184,7 +184,11 @@ def style_problems(recap: Recap, comparisons: list[Comparison] | None = None) ->
             found.append(f"is too long ({words} words, max {MAX_SENTENCE_WORDS}); split it or cut it down")
         cites_comparison = SIMILAR_MOMENTS_TOOL in sentence.tools
         if cites_comparison and other_matches and not any(m in sentence.text for m in other_matches):
-            found.append('compares with other matches without naming one; name it as "Home v Away"')
+            names = "; ".join(f'"{m}"' for m in sorted(other_matches))
+            found.append(
+                "cites a comparison but names none of the matches found (check home/away order); "
+                f"use one of these exactly: {names}, or don't cite the comparison"
+            )
         if found:
             problems[number] = "Wording: the sentence " + "; ".join(found) + "."
     return problems
