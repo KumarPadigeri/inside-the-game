@@ -3,6 +3,7 @@
     GET  /api/health
     GET  /api/matches                              match summaries
     GET  /api/matches/{match_id}                   one match with all its events
+    GET  /api/matches/{match_id}/stats             tool results (the evidence behind totals)
     GET  /api/matches/{match_id}/recaps/{style}    a saved verified recap
     POST /api/matches/{match_id}/recaps/{style}    run the agents; streams progress
                                                    (Server-Sent Events), then saves
@@ -26,6 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
 from inside_the_game import workflow
+from inside_the_game.analyst import build_tools
 from inside_the_game.generator import Match
 from inside_the_game.narrator import Style
 from inside_the_game.verifier import VerifiedRecap
@@ -84,6 +86,12 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
     async def get_match(request: Request, match_id: str) -> dict[str, Any]:
         match = await require_match(request, match_id)
         return {**match.to_dict(), "score": match.score()}
+
+    @app.get("/api/matches/{match_id}/stats")
+    async def get_stats(request: Request, match_id: str) -> dict[str, Any]:
+        """The same tool results the agents saw, keyed by tool name."""
+        match = await require_match(request, match_id)
+        return {t.name: t.func() for t in build_tools(match)}
 
     @app.get("/api/matches/{match_id}/recaps/{style}")
     async def get_recap(request: Request, match_id: str, style: Style) -> VerifiedRecap:
