@@ -18,10 +18,12 @@ import time
 from inside_the_game.generator import generate_match
 from inside_the_game.narrator import STYLE_GUIDES
 from inside_the_game.store import Store
+from inside_the_game.tracing import setup_tracing
 from inside_the_game.workflow import run_recap
 
 
 async def pregenerate(seeds: range, redo_removed: bool) -> None:
+    await setup_tracing()
     async with Store() as store:
         for seed in seeds:
             match = generate_match(seed)

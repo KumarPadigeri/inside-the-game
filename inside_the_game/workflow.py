@@ -31,6 +31,7 @@ from inside_the_game.analyst import AnalystReport
 from inside_the_game.generator import Match, generate_match
 from inside_the_game.moments import Comparison
 from inside_the_game.narrator import STYLE_GUIDES, Recap, Style
+from inside_the_game.tracing import setup_tracing
 from inside_the_game.verifier import MAX_REWRITES, Rejection, VerifiedRecap
 
 
@@ -239,7 +240,12 @@ def main() -> None:
     match = generate_match(args.seed)
     score = match.score()
     print(f"{match.home_team} {score['Home']}-{score['Away']} {match.away_team} ({args.style})")
-    result = asyncio.run(run_recap(match, args.style, verbose=True))
+    async def run() -> VerifiedRecap:
+        if await setup_tracing():
+            print("  (tracing to Azure Monitor)")
+        return await run_recap(match, args.style, verbose=True)
+
+    result = asyncio.run(run())
     recap = result.recap
     print(f"\n# {recap.headline.text}\n")
     for sentence in recap.sentences:

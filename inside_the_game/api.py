@@ -72,7 +72,9 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
             yield
             return
         from inside_the_game.store import Store  # needs COSMOS_* settings
+        from inside_the_game.tracing import setup_tracing
 
+        await setup_tracing()  # on in Azure; locally with TRACING=1
         async with Store() as cosmos:
             app.state.store = cosmos
             yield
