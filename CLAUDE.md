@@ -22,8 +22,10 @@ Each recap sentence must link to the event_ids that prove it (shown in the UI: c
 - Python 3.11 + agent-framework (Microsoft Agent Framework), azure-identity, python-dotenv
 - Microsoft Foundry: model gpt-5.4-mini, auth via AzureCliCredential (az login), settings in .env
   (FOUNDRY_PROJECT_ENDPOINT, FOUNDRY_MODEL)
-- Azure: resource group rg-inside-the-game, region eastus2. Later: Cosmos DB (data + vectors),
-  Azure Container Apps (backend + frontend), Azure Functions (live event replay)
+- Azure: resource group rg-inside-the-game, region eastus2: Cosmos DB (free tier; matches, recaps, moment
+  vectors), Container Apps (FastAPI backend, managed identity), Static Web Apps (React UI, deployed by
+  GitHub Actions), Container Registry, Application Insights (tracing). Subscription is a FREE TRIAL: keep
+  everything free. Azure Functions (live event replay) not built.
 - Frontend: React. Tests: pytest. CI: GitHub Actions.
 
 ## Match event format (draft — to be finalized)
@@ -33,9 +35,10 @@ x, y = pitch position 0-100. possession_id groups the events of one attack.
 
 ## Plan
 - Week 1 (Oct 2-5): setup  [DONE: tools, Azure, Foundry, hello_agent.py works]
-- Week 2 (Oct 6-12): data generator, stats tools + tests, Analyst + Narrator, workflow end to end locally
-- Week 3 (Oct 13-19): Verifier loop, Cosmos DB + vector search, Retrieval agent, deploy to Container Apps, Function
-- Week 4 (Oct 20-24): React UI, three styles, Foundry tracing, CI, README + architecture diagram
+- Week 2 (Oct 6-12): data generator, stats tools + tests, Analyst + Narrator, workflow end to end locally  [DONE]
+- Week 3 (Oct 13-19): Verifier loop, Cosmos DB + vector search, Retrieval agent, deploy to Container Apps  [DONE]
+  (Azure Function for live replay: skipped unless time allows)
+- Week 4 (Oct 20-24): React UI, three styles, Foundry tracing, CI, README + architecture diagram  [DONE early]
 - Oct 25-26: demo video (<2 min), pitch, submit
 
 ## How to work with me
