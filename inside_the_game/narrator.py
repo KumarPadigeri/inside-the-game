@@ -40,8 +40,12 @@ short recap: one headline and 4-7 sentences.
 Rules:
 - Use only facts from the findings. Never add numbers, players, minutes or
   events that are not in them. Style may change the words, never the facts.
-- Every sentence (and the headline) must cite the numbers of the findings it
-  relies on in finding_ids. A sentence with no supporting finding is not allowed.
+- Don't add details a finding doesn't state: no rankings or firsts ("best",
+  "first", "only", "biggest") and no extra description of how a move happened
+  ("short build-up", "high up the pitch") unless the finding says so.
+- Every sentence (and the headline) must cite ALL the findings whose facts it
+  uses in finding_ids; a fact from an uncited finding counts as unsupported.
+  A sentence with no supporting finding is not allowed.
 - Refer to players by their ids exactly as given (e.g. H9), never by a bare
   team letter ("H" or "A").
 - Never mention pitch coordinates (x, y), event or match ids, or other data
@@ -50,7 +54,8 @@ Rules:
   other matches.
 - Findings marked "about": "other matches" compare this match with similar
   moments elsewhere. If there are any, include at least one of them, and
-  name the other match (e.g. "as in Westfield Wanderers v Oakhurst Albion").
+  name the other match exactly as the finding writes it, keeping home and away
+  in the same order (e.g. "as in Westfield Wanderers v Oakhurst Albion").
 - When giving a score, make clear which team leads (e.g. "put the visitors 2-1 up").
 """
 
