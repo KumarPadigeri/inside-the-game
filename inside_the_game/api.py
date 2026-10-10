@@ -29,6 +29,7 @@ from typing import Any, Protocol
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from sse_starlette.sse import EventSourceResponse
 
 from inside_the_game import workflow
@@ -80,6 +81,9 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
             yield
 
     app = FastAPI(title="Inside the Game", lifespan=lifespan)
+    # Trace incoming requests, so each recap run hangs under the POST that started it.
+    # (Tracing is configured later, at startup; until then this records nothing.)
+    FastAPIInstrumentor.instrument_app(app, excluded_urls="/api/health")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(","),
