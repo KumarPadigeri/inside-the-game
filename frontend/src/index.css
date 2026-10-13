@@ -1,19 +1,26 @@
+/* Colour carries meaning: green = the pitch, violet/orange = the two teams, gold = goals, blue = the main action.
+   Everything else is calm neutral graphite. */
 :root {
-  --bg: #f4f6f3;
+  --bg: #f6f6f7;
   --surface: #ffffff;
-  --surface-2: #eef2ec;
-  --text: #17201a;
-  --muted: #5d6b61;
-  --border: #d9e0d7;
-  --accent: #127a43;
-  --accent-soft: #e2f3e8;
-  --home: #1f5fbf;
+  --surface-2: #f0f0f2;
+  --text: #18181b;
+  --muted: #5f5f69;
+  --border: #e1e1e5;
+  --accent: #3f3f46;
+  --on-accent: #ffffff;
+  --accent-soft: #ececef;
+  --action: #2563eb; /* the one main action: Generate / Regenerate */
+  --on-action: #ffffff;
+  --home: #7c3aed;
   --away: #c2410c;
   --goal: #d4a106;
   --danger: #b42318;
   --grass: #2f7d47;
   --grass-line: rgba(255, 255, 255, 0.75);
   --radius: 10px;
+  /* The two content columns, shared by the top band and the recap area so they line up. */
+  --columns: minmax(0, 3fr) minmax(0, 2fr);
 
   color-scheme: light dark;
   font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -22,17 +29,21 @@
   background: var(--bg);
 }
 
+/* Dark colours: when the computer is in dark mode (unless Light is chosen), or when Dark is chosen. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1411;
-    --surface: #171e19;
-    --surface-2: #1e2721;
-    --text: #e6ece7;
-    --muted: #97a59b;
-    --border: #2b362e;
-    --accent: #4cc27f;
-    --accent-soft: #1b3324;
-    --home: #6ea3f2;
+  :root:not([data-theme='light']) {
+    --bg: #111113;
+    --surface: #19191c;
+    --surface-2: #222226;
+    --text: #ececee;
+    --muted: #a1a1aa;
+    --border: #2e2e33;
+    --accent: #d4d4d8;
+    --on-accent: #111113;
+    --accent-soft: #27272a;
+    --action: #60a5fa;
+    --on-action: #0b1220;
+    --home: #b794f6;
     --away: #f08a55;
     --goal: #f2c94c;
     --danger: #f97066;
@@ -40,8 +51,63 @@
   }
 }
 
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #111113;
+  --surface: #19191c;
+  --surface-2: #222226;
+  --text: #ececee;
+  --muted: #a1a1aa;
+  --border: #2e2e33;
+  --accent: #d4d4d8;
+  --on-accent: #111113;
+  --accent-soft: #27272a;
+  --action: #60a5fa;
+  --on-action: #0b1220;
+  --home: #b794f6;
+  --away: #f08a55;
+  --goal: #f2c94c;
+  --danger: #f97066;
+  --grass: #24603a;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
 * {
   box-sizing: border-box;
+  /* Thin scrollbars, invisible until the element scrolls (Chrome, Edge, Firefox). */
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+/* Shown while scrolling (src/scrollbars.ts adds the class, then removes it shortly after). */
+.is-scrolling {
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+}
+
+/* The same for Safari, which only understands the older -webkit- form. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: transparent;
+}
+
+.is-scrolling::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
+.is-scrolling::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted) 75%, transparent);
 }
 
 body {
@@ -74,10 +140,22 @@ h4 {
 
 /* ---- layout ---- */
 
+/* Dashboard layout: the page itself never scrolls; the match list, recap and evidence each scroll inside. */
 .app {
-  max-width: 1400px;
+  /* Wide enough to fill a 1080p screen; capped so it doesn't sprawl on very large monitors. */
+  max-width: 1760px;
+  height: 100vh;
+  /* Safety net: nothing may stick out and make the page itself scrollable. */
+  position: relative;
+  overflow: hidden;
   margin: 0 auto;
-  padding: 16px;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  flex: none;
 }
 
 .topbar {
@@ -111,6 +189,8 @@ h4 {
 }
 
 .layout {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
   gap: 20px;
@@ -121,6 +201,13 @@ main {
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+  min-height: 0;
+}
+
+.match-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* ---- match list ---- */
@@ -140,7 +227,8 @@ main {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: calc(100vh - 140px);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -204,8 +292,14 @@ main {
 .controls {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
+  align-items: center;
   gap: 12px;
+}
+
+/* Style picker on the left, the Generate button (or the passcode box) at the right end of the row. */
+.controls > .primary,
+.controls > .passcode {
+  margin-left: auto;
 }
 
 .styles {
@@ -217,6 +311,9 @@ main {
 }
 
 .styles button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
   background: transparent;
   border-radius: 999px;
@@ -224,17 +321,23 @@ main {
   text-transform: capitalize;
 }
 
+.persona-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
 .styles button.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .primary {
   border: 0;
   border-radius: 999px;
   padding: 8px 18px;
-  background: var(--accent);
-  color: #fff;
+  background: var(--action);
+  color: var(--on-action);
   font-weight: 600;
 }
 
@@ -318,16 +421,27 @@ main {
 
 /* ---- recap & evidence ---- */
 
+/* Fills the space under the band; the recap and the evidence panel scroll independently. */
 .recap-grid {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: var(--columns);
   gap: 20px;
-  align-items: start;
+}
+
+.recap-column {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
 }
 
 .recap-grid aside {
-  position: sticky;
-  top: 16px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -376,7 +490,26 @@ main {
 .evidence {
   display: flex;
   flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.evidence-pinned {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.evidence-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   gap: 16px;
+  padding-right: 4px;
+  overscroll-behavior: contain;
 }
 
 .evidence section {
@@ -474,6 +607,90 @@ thead th {
 .pitch {
   width: 100%;
   height: auto;
+}
+
+/* ---- top band: scoreboard, styles, agents (left) and the pitch (right) ---- */
+
+.stage {
+  flex: none;
+  display: grid;
+  grid-template-columns: var(--columns);
+  gap: 20px;
+  align-items: stretch;
+}
+
+.stage-left {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* The agents box grows to fill the band, so its bottom lines up with the pitch (no empty gap). */
+.stage-left .pipeline {
+  flex: 1;
+  align-content: center;
+  justify-content: center;
+}
+
+/* As wide as the evidence panel below it; capped in height on short screens (the drawing stays centred). */
+.stage-pitch {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 109 / 72;
+  max-height: 40vh;
+}
+
+.stage-pitch .pitch {
+  width: 100%;
+  height: 100%;
+}
+
+/* The ball that replays a move, and the pulse where a goal goes in. */
+.pitch-ball {
+  fill: #ffffff;
+  stroke: #1a2230;
+  stroke-width: 0.4;
+}
+
+.pitch-goal-pulse {
+  fill: none;
+  stroke: var(--goal);
+  stroke-width: 0.8;
+}
+
+.replay {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 0.75rem;
+}
+
+.replay:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .replay {
+    display: none;
+  }
+}
+
+.stage-pitch-note {
+  position: absolute;
+  inset: auto 8px 8px 8px;
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.75rem;
+  text-align: center;
 }
 
 .pitch-grass {
@@ -600,13 +817,116 @@ thead th {
     width: 200px;
   }
 
-  .recap-grid aside {
-    position: static;
+  /* Small screens: back to a normal scrolling page, everything stacked in one column. */
+  .app {
+    height: auto;
+    overflow: visible;
+  }
+
+  .stage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stage-pitch {
+    max-height: none;
+  }
+
+  .recap-column,
+  .recap-grid aside,
+  .evidence-scroll {
+    overflow: visible;
   }
 
   .scoreboard .final {
     font-size: 1.5rem;
   }
+
+  .scoreboard {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .scoreboard .team {
+    font-size: 0.95rem;
+  }
+
+  .styles button {
+    padding: 6px 10px;
+  }
+
+  /* Wide tables scroll sideways inside the panel instead of widening the page. */
+  .evidence table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  /* Agents as a tidy 2 x 2 grid: Analyst, Retrieval / Narrator, Verifier. */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .pipeline-parallel {
+    display: contents;
+  }
+
+  .pipeline-arrow {
+    display: none;
+  }
+
+  .step {
+    min-width: 0;
+  }
+}
+
+/* ---- theme toggle ---- */
+
+.topbar-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px;
+  background: var(--surface);
+}
+
+.theme-toggle button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.theme-toggle button.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.theme-toggle svg {
+  width: 15px;
+  height: 15px;
+}
+
+.theme-toggle button {
+  padding: 5px 8px;
+}
+
+/* At the top-right corner: open the tooltips leftwards so they stay on screen. */
+.theme-toggle [data-tooltip]::after {
+  left: auto;
+  right: 0;
 }
 
 /* ---- passcode ---- */
@@ -631,4 +951,144 @@ thead th {
   border-radius: 999px;
   padding: 6px 12px;
   width: 180px;
+}
+
+/* ---- tooltips: shown instantly on hover or keyboard focus (any element with data-tooltip) ---- */
+
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 10;
+  width: max-content;
+  max-width: min(300px, 80vw);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  /* Only exists while shown: even an invisible tooltip box would make the page wider than a phone screen. */
+  display: none;
+}
+
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after {
+  display: block;
+}
+
+/* Touch screens can't hover: the short role under each agent is enough there. */
+@media (hover: none) {
+  [data-tooltip]:hover::after {
+    display: none;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The last pipeline step sits at the right edge: open its tooltip leftwards so it stays on screen. */
+.pipeline > .step:last-child[data-tooltip]::after {
+  left: auto;
+  right: 0;
+}
+
+/* ---- loading skeletons ---- */
+
+.skeleton {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 45%, var(--surface-2) 65%);
+  background-size: 300% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+.skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.skeleton-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.skeleton-stack.tight {
+  gap: 6px;
+}
+
+.scoreboard .skeleton:first-child {
+  justify-self: end;
+}
+
+.waking {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  font-size: 0.8rem;
+}
+
+/* ---- which styles already have a recap (match list) ---- */
+
+.recap-marks {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.recap-marks .persona-icon {
+  width: 12px;
+  height: 12px;
+  opacity: 0.25;
+}
+
+.recap-marks .has .persona-icon {
+  opacity: 1;
+  color: var(--action);
+}
+
+/* Stands in for the agents box while a match loads, so the band keeps its shape. */
+.stage-skeleton {
+  flex: 1;
+  min-height: 80px;
+  border-radius: var(--radius);
 }

@@ -1,5 +1,5 @@
 import type { Comparison, Match, MatchEvent, RecapSentence, Stats, Team } from '../api'
-import { Pitch } from './Pitch'
+import { sentenceEvents } from '../matchEvents'
 
 interface EvidenceProps {
   sentence: RecapSentence
@@ -176,26 +176,31 @@ function ToolEvidence({ tool, match, stats, comparisons, sentence }: { tool: str
   }
 }
 
-/** Everything that proves one sentence: its events on the pitch and in a table, plus cited tool results. */
+/**
+ * Everything that proves one sentence (its events are drawn on the pitch in the sticky band above).
+ * The quote stays pinned; the event table and the cited tool results scroll in their own area.
+ */
 export function Evidence(props: EvidenceProps) {
   const { sentence, match } = props
-  const byId = new Map(match.events.map((e) => [e.event_id, e]))
-  const events = sentence.event_ids.map((id) => byId.get(id)).filter((e): e is MatchEvent => e !== undefined)
+  const events = sentenceEvents(match, sentence)
   return (
     <div className="evidence">
-      <p className="evidence-quote">“{sentence.text}”</p>
-      {events.length > 0 && (
-        <section>
-          <h4>
-            {events.length} event{events.length === 1 ? '' : 's'} behind this sentence
-          </h4>
-          <Pitch events={events} />
-          <EventTable events={events} match={match} />
-        </section>
-      )}
-      {sentence.tools.map((tool) => (
-        <ToolEvidence key={tool} tool={tool} {...props} />
-      ))}
+      <div className="evidence-pinned">
+        <p className="evidence-quote">“{sentence.text}”</p>
+      </div>
+      <div className="evidence-scroll">
+        {events.length > 0 && (
+          <section>
+            <h4>
+              {events.length} event{events.length === 1 ? '' : 's'} behind this sentence
+            </h4>
+            <EventTable events={events} match={match} />
+          </section>
+        )}
+        {sentence.tools.map((tool) => (
+          <ToolEvidence key={tool} tool={tool} {...props} />
+        ))}
+      </div>
     </div>
   )
 }

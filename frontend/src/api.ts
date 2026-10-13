@@ -26,6 +26,7 @@ export interface MatchSummary {
   home_team: string
   away_team: string
   score: Score
+  recaps?: Style[] // styles that already have a saved recap
 }
 
 export interface Match extends MatchSummary {

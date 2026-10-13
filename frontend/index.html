@@ -6,6 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Inside the Game</title>
     <meta name="description" content="Explainable, fact-checked football match recaps from synthetic match data." />
+    <script>
+      // Apply a saved light/dark choice before the page paints (see src/theme.ts).
+      try {
+        var theme = localStorage.getItem('itg-theme')
+        if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

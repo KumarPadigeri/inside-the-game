@@ -15,8 +15,15 @@ import {
   type VerifiedRecap,
 } from './api'
 import { Evidence } from './components/Evidence'
+import { Pitch } from './components/Pitch'
+import { MatchListSkeleton, RecapSkeleton, ScoreboardSkeleton } from './components/Skeleton'
+import { ThemeToggle } from './components/ThemeToggle'
+import { PersonaIcon } from './components/PersonaIcon'
 import { Pipeline } from './components/Pipeline'
 import { FactCheckLog, RecapView } from './components/RecapView'
+import { sentenceEvents } from './matchEvents'
+import { PERSONAS } from './personas'
+import { applyTheme, loadTheme, type Theme } from './theme'
 import { EMPTY_PIPELINE, applyProgress, type PipelineState } from './pipelineState'
 
 const PASSCODE_KEY = 'itg-demo-passcode'
@@ -52,14 +59,32 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [passcode, setPasscode] = useState(loadPasscode)
   const [askPasscode, setAskPasscode] = useState(false)
+  const [theme, setTheme] = useState<Theme>(loadTheme)
+  const [replay, setReplay] = useState(0) // bump to replay the ball on the pitch
+  const [listLoading, setListLoading] = useState(true) // the match list hasn't arrived yet
+  const [slowStart, setSlowStart] = useState(false) // ...and it's taking a while (the backend is waking up)
+  const [loading, setLoading] = useState(true) // the selected match / recap is loading
+
+  function chooseTheme(next: Theme) {
+    applyTheme(next)
+    setTheme(next)
+  }
 
   useEffect(() => {
+    // The backend scales to zero when idle; if the first answer is slow, say why instead of looking broken.
+    const timer = setTimeout(() => setSlowStart(true), 2500)
     listMatches()
       .then((list) => {
         setMatches(list)
         setMatchId((current) => current ?? list[0]?.match_id ?? null)
       })
       .catch((e: Error) => setError(e.message))
+      .finally(() => {
+        clearTimeout(timer)
+        setListLoading(false)
+        setSlowStart(false)
+      })
+    return () => clearTimeout(timer)
   }, [])
 
   // Load the match, its stats and any saved recap whenever the match or style changes.
@@ -75,6 +100,7 @@ export default function App() {
         setSelected(r?.recap.headline ?? null)
       })
       .catch((e: Error) => !cancelled && setError(e.message))
+      .finally(() => !cancelled && setLoading(false))
     return () => {
       cancelled = true
     }
@@ -88,12 +114,18 @@ export default function App() {
   }
 
   function chooseMatch(id: string) {
+    if (id === matchId) return
     resetView()
+    setMatch(null) // so the old scoreboard doesn't linger while the new match loads
+    setStats(null)
+    setLoading(true)
     setMatchId(id)
   }
 
   function chooseStyle(next: Style) {
+    if (next === style) return
     resetView()
+    setLoading(true)
     setStyle(next)
   }
 
@@ -104,19 +136,27 @@ export default function App() {
     setError(null)
     resetView()
     try {
-      const recap = await generateRecap(matchId, style, code, (p) =>
-        setPipeline((state) => applyProgress(state, p)),
-      )
+      const recap = await generateRecap(matchId, style, code, (p) => setPipeline((state) => applyProgress(state, p)))
       setResult(recap)
       setSelected(recap.recap.headline)
       savePasscode(code)
+      // Mark the new recap in the match list.
+      setMatches((list) =>
+        list.map((m) =>
+          m.match_id === matchId ? { ...m, recaps: [...new Set([...(m.recaps ?? []), style])].sort() } : m,
+        ),
+      )
     } catch (e) {
       if (e instanceof PasscodeError) {
         setPasscode('')
         savePasscode('')
         setAskPasscode(true)
         // Bring back the saved recap (if any) that was cleared when we started.
-        if (matchId) getRecap(matchId, style).then((r) => setResult(r)).catch(() => {})
+        if (matchId) {
+          getRecap(matchId, style)
+            .then((r) => setResult(r))
+            .catch(() => {})
+        }
       }
       setError((e as Error).message)
     } finally {
@@ -131,13 +171,22 @@ export default function App() {
           <h1>Inside the Game</h1>
           <p className="tagline">Match recaps where every sentence shows its proof.</p>
         </div>
-        <p className="synthetic-note">All teams, players and matches are synthetic.</p>
+        <div className="topbar-right">
+          <p className="synthetic-note">All teams, players and matches are synthetic.</p>
+          <ThemeToggle theme={theme} onChange={chooseTheme} />
+        </div>
       </header>
 
       <div className="layout">
         <nav className="match-list" aria-label="Matches">
           <h2>Matches</h2>
-          <ul>
+          {slowStart && (
+            <p className="waking" role="status">
+              Waking up the server… it sleeps when nobody is using it, so the first load takes about 15 seconds.
+            </p>
+          )}
+          {listLoading && <MatchListSkeleton />}
+          <ul hidden={listLoading}>
             {matches.map((m) => (
               <li key={m.match_id}>
                 <button
@@ -150,6 +199,7 @@ export default function App() {
                     {m.home_team}
                     <br />
                     {m.away_team}
+                    <RecapMarks styles={m.recaps ?? []} />
                   </span>
                   <span className="score">
                     {m.score.Home}
@@ -163,71 +213,99 @@ export default function App() {
         </nav>
 
         <main>
-          {match && (
-            <section className="scoreboard" aria-label="Final score">
-              <span className="team home">{match.home_team}</span>
-              <span className="final">
-                {match.score.Home} – {match.score.Away}
-              </span>
-              <span className="team away">{match.away_team}</span>
-            </section>
-          )}
+          {/* The band: scoreboard, styles and agents on the left, the pitch on the right. Same columns as below. */}
+          <section className="stage" aria-label="Match, agents and pitch">
+            <div className="stage-left">
+              {!match && <ScoreboardSkeleton />}
+              {match && (
+                <section className="scoreboard" aria-label="Final score">
+                  <span className="team home">{match.home_team}</span>
+                  <span className="final">
+                    {match.score.Home} – {match.score.Away}
+                  </span>
+                  <span className="team away">{match.away_team}</span>
+                </section>
+              )}
 
-          <section className="controls">
-            <div className="styles" role="radiogroup" aria-label="Recap style">
-              {STYLES.map((s) => (
-                <button
-                  type="button"
-                  key={s}
-                  role="radio"
-                  aria-checked={s === style}
-                  className={s === style ? 'active' : undefined}
-                  onClick={() => chooseStyle(s)}
-                  disabled={running}
-                >
-                  {s}
-                </button>
-              ))}
+              <section className="controls">
+                <div className="styles" role="radiogroup" aria-label="Recap style">
+                  {STYLES.map((s) => (
+                    <button
+                      type="button"
+                      key={s}
+                      role="radio"
+                      aria-checked={s === style}
+                      className={s === style ? 'active' : undefined}
+                      onClick={() => chooseStyle(s)}
+                      disabled={running}
+                      data-tooltip={PERSONAS[s]}
+                      aria-description={PERSONAS[s]}
+                    >
+                      <PersonaIcon style={s} />
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                {askPasscode ? (
+                  <form
+                    className="passcode"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      void generate(passcode)
+                    }}
+                  >
+                    <label htmlFor="passcode">Demo passcode</label>
+                    <input
+                      id="passcode"
+                      type="password"
+                      autoComplete="off"
+                      value={passcode}
+                      onChange={(e) => setPasscode(e.target.value)}
+                      autoFocus
+                    />
+                    <button type="submit" className="primary" disabled={!passcode}>
+                      Run agents
+                    </button>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => (passcode ? void generate() : setAskPasscode(true))}
+                    disabled={running || loading || !matchId}
+                  >
+                    {running ? 'Agents at work…' : result ? 'Regenerate recap' : 'Generate recap'}
+                  </button>
+                )}
+              </section>
+
+              {loading && !running && <span className="skeleton stage-skeleton" aria-hidden="true" />}
+              {(running || result) && <Pipeline state={result && !running ? doneState(result.rewrites) : pipeline} />}
             </div>
-            {askPasscode ? (
-              <form
-                className="passcode"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  void generate(passcode)
-                }}
-              >
-                <label htmlFor="passcode">Demo passcode</label>
-                <input
-                  id="passcode"
-                  type="password"
-                  autoComplete="off"
-                  value={passcode}
-                  onChange={(e) => setPasscode(e.target.value)}
-                  autoFocus
-                />
-                <button type="submit" className="primary" disabled={!passcode}>
-                  Run agents
+            <div className="stage-pitch">
+              <Pitch events={match && selected ? sentenceEvents(match, selected) : []} replay={replay} />
+              {match && selected && sentenceEvents(match, selected).length > 0 && (
+                <button type="button" className="replay" onClick={() => setReplay((n) => n + 1)}>
+                  ↻ Replay
                 </button>
-              </form>
-            ) : (
-              <button
-                type="button"
-                className="primary"
-                onClick={() => (passcode ? void generate() : setAskPasscode(true))}
-                disabled={running || !matchId}
-              >
-                {running ? 'Agents at work…' : result ? 'Regenerate recap' : 'Generate recap'}
-              </button>
-            )}
+              )}
+              {!loading && pitchNote(running, result !== null, selected, match) && (
+                <p className="stage-pitch-note">{pitchNote(running, result !== null, selected, match)}</p>
+              )}
+            </div>
           </section>
-
-          {(running || result) && <Pipeline state={result && !running ? doneState(result.rewrites) : pipeline} />}
           {error && <p className="error">{error}</p>}
 
-          {result && match ? (
+          {loading && !running ? (
+            <>
+              <p className="visually-hidden" role="status">
+                Loading
+              </p>
+              <RecapSkeleton />
+            </>
+          ) : result && match ? (
             <div className="recap-grid">
-              <div>
+              <div className="recap-column">
                 <RecapView result={result} selected={selected} onSelect={setSelected} />
                 <FactCheckLog result={result} />
               </div>
@@ -242,8 +320,8 @@ export default function App() {
           ) : (
             !running && (
               <p className="empty">
-                No {style} recap for this match yet. Generating one runs the four agents live (it takes a
-                minute or two) and needs the demo passcode.
+                No {style} recap for this match yet. Generating one runs the four agents live (it takes a minute or two)
+                and needs the demo passcode.
               </p>
             )
           )}
@@ -251,6 +329,33 @@ export default function App() {
       </div>
     </div>
   )
+}
+
+/** Small persona icons on a match card: lit for each style that already has a recap. */
+function RecapMarks({ styles }: { styles: Style[] }) {
+  return (
+    // Described with a label, not hidden text: a positioned hidden element escapes the scrolling match strip.
+    <span
+      className="recap-marks"
+      role="img"
+      aria-label={styles.length ? `Recaps: ${styles.join(', ')}` : 'No recaps yet'}
+    >
+      {STYLES.map((s) => (
+        <span key={s} className={styles.includes(s) ? 'has' : undefined}>
+          <PersonaIcon style={s} />
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** The hint shown on the pitch when it has no events to draw (null when it has some). */
+function pitchNote(running: boolean, hasRecap: boolean, selected: RecapSentence | null, match: Match | null) {
+  if (running) return 'The agents are working…'
+  if (!hasRecap) return 'Generate a recap, then click a sentence to see where it happened.'
+  if (!selected || !match) return 'Click a sentence to see where it happened.'
+  if (sentenceEvents(match, selected).length === 0) return 'This sentence is backed by stats, not specific moments.'
+  return null
 }
 
 /** A finished (or saved) recap: every step done, with the rewrites it took. */
