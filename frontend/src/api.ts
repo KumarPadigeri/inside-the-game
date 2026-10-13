@@ -162,6 +162,38 @@ export const getRecap = (id: string, style: Style, language: Language) =>
 /** Thrown when the server refuses to generate (missing or wrong demo passcode). */
 export class PasscodeError extends Error {}
 
+/** Read a Server-Sent Events stream from a fetch response, calling onEvent for each message. */
+async function readEvents(response: Response, onEvent: (event: string, data: string) => void): Promise<void> {
+  if (!response.body) throw new Error('The server sent no stream')
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
+  let buffer = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += value.replace(/\r\n/g, '\n')
+    let end: number
+    while ((end = buffer.indexOf('\n\n')) !== -1) {
+      const block = buffer.slice(0, end)
+      buffer = buffer.slice(end + 2)
+      const event = /^event: (.*)$/m.exec(block)?.[1]
+      const data = block
+        .split('\n')
+        .filter((line) => line.startsWith('data: '))
+        .map((line) => line.slice(6))
+        .join('\n')
+      if (event && data) onEvent(event, data) // skips pings and comments
+    }
+  }
+}
+
+async function refusal(response: Response): Promise<never> {
+  if (response.status === 403) {
+    const detail = ((await response.json()) as { detail?: string }).detail
+    throw new PasscodeError(detail ?? 'Generating needs the demo passcode')
+  }
+  throw new Error(`Request failed: ${response.status}`)
+}
+
 /**
  * Run the agents for a match and follow along. The backend streams Server-Sent
  * Events; EventSource only supports GET, so we read the POST response stream.
@@ -177,35 +209,81 @@ export async function generateRecap(
     method: 'POST',
     headers: passcode ? { 'X-Recap-Passcode': passcode } : {},
   })
-  if (response.status === 403) {
-    const detail = ((await response.json()) as { detail?: string }).detail
-    throw new PasscodeError(detail ?? 'Generating recaps needs the demo passcode')
-  }
-  if (!response.ok || !response.body) throw new Error(`Recap failed: ${response.status}`)
-
-  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
-  let buffer = ''
+  if (!response.ok) await refusal(response)
   let recap: VerifiedRecap | null = null
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += value.replace(/\r\n/g, '\n')
-    let end: number
-    while ((end = buffer.indexOf('\n\n')) !== -1) {
-      const block = buffer.slice(0, end)
-      buffer = buffer.slice(end + 2)
-      const event = /^event: (.*)$/m.exec(block)?.[1]
-      const data = block
-        .split('\n')
-        .filter((line) => line.startsWith('data: '))
-        .map((line) => line.slice(6))
-        .join('\n')
-      if (!event || !data) continue // pings and comments
-      if (event === 'progress') onProgress(JSON.parse(data) as Progress)
-      else if (event === 'recap') recap = JSON.parse(data) as VerifiedRecap
-      else if (event === 'error') throw new Error((JSON.parse(data) as { detail: string }).detail)
-    }
-  }
+  await readEvents(response, (event, data) => {
+    if (event === 'progress') onProgress(JSON.parse(data) as Progress)
+    else if (event === 'recap') recap = JSON.parse(data) as VerifiedRecap
+    else if (event === 'error') throw new Error((JSON.parse(data) as { detail: string }).detail)
+  })
   if (!recap) throw new Error('The stream ended without a recap')
   return recap
+}
+
+// --- live mode -------------------------------------------------------------
+
+/** Sent every match minute: that minute's events and the running stats. */
+export interface LiveTick {
+  minute: number
+  score: Score
+  possession: Record<Team, number>
+  passes_completed: Record<Team, number>
+  shots: Record<Team, number>
+  on_target: Record<Team, number>
+  events: MatchEvent[]
+}
+
+export interface LiveMoment {
+  key: string
+  kind: 'goal' | 'counterattack' | 'half-time' | 'full-time'
+  minute: number
+  team: Team | null
+  event_ids: number[]
+}
+
+/** Verified sentences about a moment, with the stats as they stood at that minute. */
+export interface Commentary {
+  moment: LiveMoment
+  sentences: RecapSentence[]
+  stats: Stats
+  rewrites: number
+  removed: { text: string; problem: string }[]
+}
+
+export interface LiveStart {
+  match_id: string
+  style: Style
+  language: Language
+  commentary: 'saved' | 'none' | 'live' // replaying saved commentary, stats only, or agents commentating now
+}
+
+export type LiveMessage =
+  | { type: 'start'; data: LiveStart }
+  | { type: 'tick'; data: LiveTick }
+  | { type: 'moment'; data: LiveMoment }
+  | { type: 'commentary'; data: Commentary }
+  | { type: 'done'; data: { minute: number; score: Score } }
+
+/**
+ * Play a match live. Watching (GET) is free: live stats, plus saved commentary if any.
+ * With `generate`, the agents commentate now (POST, needs the passcode) and the run is saved.
+ */
+export async function streamLive(
+  id: string,
+  style: Style,
+  language: Language,
+  options: { generate: boolean; passcode: string; secondsPerMinute: number; signal: AbortSignal },
+  onMessage: (message: LiveMessage) => void,
+): Promise<void> {
+  const query = `?language=${language}&seconds_per_minute=${options.secondsPerMinute}`
+  const response = await fetch(`${BASE}/api/matches/${id}/live/${style}${query}`, {
+    method: options.generate ? 'POST' : 'GET',
+    headers: options.generate && options.passcode ? { 'X-Recap-Passcode': options.passcode } : {},
+    signal: options.signal,
+  })
+  if (!response.ok) await refusal(response)
+  await readEvents(response, (event, data) => {
+    if (event === 'error') throw new Error((JSON.parse(data) as { detail: string }).detail)
+    onMessage({ type: event, data: JSON.parse(data) } as LiveMessage)
+  })
 }

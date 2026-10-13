@@ -23,7 +23,13 @@
   --columns: minmax(0, 3fr) minmax(0, 2fr);
 
   color-scheme: light dark;
-  font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   line-height: 1.5;
   color: var(--text);
   background: var(--bg);
@@ -1123,4 +1129,256 @@ thead th {
   flex: 1;
   min-height: 80px;
   border-radius: var(--radius);
+}
+
+/* ---- live mode ---- */
+
+.mode-tabs {
+  display: inline-flex;
+  align-self: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+  background: var(--surface);
+}
+
+.mode-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 18px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mode-tabs button.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e5484d;
+  animation: live-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.scoreboard .clock {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+  color: var(--muted);
+}
+
+.controls > .live-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.speed {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.speed select {
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.live-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.live-stats-teams {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.live-stats-teams .home {
+  color: var(--home);
+}
+
+.live-stats-teams .away {
+  color: var(--away);
+}
+
+.live-stat {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr 3.5rem;
+  align-items: center;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-stat .value {
+  font-weight: 700;
+}
+
+.live-stat .value:last-child {
+  text-align: right;
+}
+
+.live-stat-bar .label {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.live-stat-bar .bar {
+  display: flex;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.live-stat-bar .bar span {
+  transition: width 0.4s ease;
+}
+
+.live-stat-bar .bar .home {
+  background: var(--home);
+}
+
+.live-stat-bar .bar .away {
+  background: var(--away);
+}
+
+.live-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.live-notice p {
+  flex: 1 1 260px;
+  margin: 0;
+}
+
+.secondary {
+  border: 1px solid var(--action);
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: transparent;
+  color: var(--action);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.live-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.live-item {
+  border-left: 3px solid var(--border);
+  padding-left: 10px;
+  animation: live-in 0.35s ease-out;
+}
+
+.live-item.goal {
+  border-left-color: var(--goal);
+}
+
+.live-item.counterattack {
+  border-left-color: var(--action);
+}
+
+@keyframes live-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.live-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 10px;
+}
+
+.live-minute {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-kind {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.live-item.goal .live-kind {
+  color: var(--goal);
+}
+
+.live-facts {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.live-pending {
+  margin: 4px 10px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.evidence-asof {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot,
+  .live-item {
+    animation: none;
+  }
 }

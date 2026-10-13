@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   LANGUAGES,
   PasscodeError,
@@ -8,6 +8,7 @@ import {
   getRecap,
   getStats,
   listMatches,
+  streamLive,
   type Language,
   type Match,
   type MatchSummary,
@@ -23,6 +24,8 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { PersonaIcon } from './components/PersonaIcon'
 import { Pipeline } from './components/Pipeline'
 import { FactCheckLog, RecapView } from './components/RecapView'
+import { LiveFeed, LiveStats } from './components/Live'
+import { IDLE_LIVE, applyLive, type FeedItem, type LiveState } from './liveState'
 import { sentenceEvents } from './matchEvents'
 import { PERSONAS } from './personas'
 import { applyTheme, loadTheme, type Theme } from './theme'
@@ -30,6 +33,15 @@ import { loadLanguage, saveLanguage } from './language'
 import { EMPTY_PIPELINE, applyProgress, type PipelineState } from './pipelineState'
 
 const PASSCODE_KEY = 'itg-demo-passcode'
+
+type Mode = 'recap' | 'live'
+
+/** Live playback speeds: seconds per match minute (1× plays a match in about a minute and a half). */
+const SPEEDS: [label: string, secondsPerMinute: number][] = [
+  ['1×', 1],
+  ['2×', 0.5],
+  ['4×', 0.25],
+]
 
 // The passcode lives only in this tab (sessionStorage), which can be unavailable: never rely on it.
 function loadPasscode(): string {
@@ -62,12 +74,17 @@ export default function App() {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [passcode, setPasscode] = useState(loadPasscode)
-  const [askPasscode, setAskPasscode] = useState(false)
+  const [askPasscode, setAskPasscode] = useState<Mode | null>(null) // which action is waiting for the passcode
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const [replay, setReplay] = useState(0) // bump to replay the ball on the pitch
   const [listLoading, setListLoading] = useState(true) // the match list hasn't arrived yet
   const [slowStart, setSlowStart] = useState(false) // ...and it's taking a while (the backend is waking up)
   const [loading, setLoading] = useState(true) // the selected match / recap is loading
+  const [mode, setMode] = useState<Mode>('recap')
+  const [live, setLive] = useState<LiveState>(IDLE_LIVE)
+  const [liveSelected, setLiveSelected] = useState<{ sentence: RecapSentence; item: FeedItem } | null>(null)
+  const [speed, setSpeed] = useState(1)
+  const liveStream = useRef<AbortController | null>(null)
 
   function chooseTheme(next: Theme) {
     applyTheme(next)
@@ -110,11 +127,66 @@ export default function App() {
     }
   }, [matchId, style, language])
 
+  // Stop a live stream when the page goes away.
+  useEffect(() => () => liveStream.current?.abort(), [])
+
+  function stopLive() {
+    liveStream.current?.abort()
+    liveStream.current = null
+    setLive((state) => (state.status === 'playing' ? { ...state, status: 'done' } : state))
+  }
+
+  function resetLive() {
+    liveStream.current?.abort()
+    liveStream.current = null
+    setLive(IDLE_LIVE)
+    setLiveSelected(null)
+  }
+
   /** Clear what belongs to the previous match or style before switching. */
   function resetView() {
     setResult(null)
     setSelected(null)
     setPipeline(EMPTY_PIPELINE)
+    resetLive()
+  }
+
+  function chooseMode(next: Mode) {
+    if (next === mode) return
+    resetLive()
+    setAskPasscode(null)
+    setMode(next)
+  }
+
+  /** Play the match live: free with saved (or no) commentary; with `generate`, the agents commentate now. */
+  async function startLive(generate: boolean, code = passcode) {
+    if (!matchId) return
+    resetLive()
+    setAskPasscode(null)
+    setError(null)
+    const controller = new AbortController()
+    liveStream.current = controller
+    try {
+      await streamLive(
+        matchId,
+        style,
+        language,
+        { generate, passcode: code, secondsPerMinute: speed, signal: controller.signal },
+        (message) => setLive((state) => applyLive(state, message)),
+      )
+      if (generate) savePasscode(code)
+    } catch (e) {
+      if (controller.signal.aborted) return // stopped on purpose
+      if (e instanceof PasscodeError) {
+        setPasscode('')
+        savePasscode('')
+        setAskPasscode('live')
+      }
+      setError((e as Error).message)
+      setLive((state) => ({ ...state, status: 'done' }))
+    } finally {
+      if (liveStream.current === controller) liveStream.current = null
+    }
   }
 
   function chooseMatch(id: string) {
@@ -143,7 +215,7 @@ export default function App() {
 
   async function generate(code = passcode) {
     if (!matchId) return
-    setAskPasscode(false)
+    setAskPasscode(null)
     setRunning(true)
     setError(null)
     resetView()
@@ -166,7 +238,7 @@ export default function App() {
       if (e instanceof PasscodeError) {
         setPasscode('')
         savePasscode('')
-        setAskPasscode(true)
+        setAskPasscode('recap')
         // Bring back the saved recap (if any) that was cleared when we started.
         if (matchId) {
           getRecap(matchId, style, language)
@@ -180,12 +252,41 @@ export default function App() {
     }
   }
 
+  const isLive = mode === 'live'
+  const liveMatch: Match | null = match && { ...match, events: live.events }
+  const pitchEvents = isLive
+    ? liveSelected && liveMatch
+      ? sentenceEvents(liveMatch, liveSelected.sentence)
+      : (live.tick?.events ?? [])
+    : match && selected
+      ? sentenceEvents(match, selected)
+      : []
+  const note = isLive
+    ? livePitchNote(live, liveSelected !== null)
+    : pitchNote(running, result !== null, selected, match)
+
   return (
     <div className="app">
       <header className="topbar">
         <div>
           <h1>Inside the Game</h1>
           <p className="tagline">Match recaps where every sentence shows its proof.</p>
+        </div>
+        <div className="mode-tabs" role="tablist" aria-label="View">
+          {(['recap', 'live'] as const).map((m) => (
+            <button
+              type="button"
+              role="tab"
+              key={m}
+              aria-selected={mode === m}
+              className={mode === m ? 'active' : undefined}
+              onClick={() => chooseMode(m)}
+              disabled={running}
+            >
+              {m === 'recap' ? 'Recap' : 'Live'}
+              {m === 'live' && live.status === 'playing' && <span className="live-dot" aria-hidden="true" />}
+            </button>
+          ))}
         </div>
         <div className="topbar-right">
           <p className="synthetic-note">All teams, players and matches are synthetic.</p>
@@ -234,10 +335,16 @@ export default function App() {
             <div className="stage-left">
               {!match && <ScoreboardSkeleton />}
               {match && (
-                <section className="scoreboard" aria-label="Final score">
+                <section className="scoreboard" aria-label={isLive ? 'Live score' : 'Final score'}>
                   <span className="team home">{match.home_team}</span>
                   <span className="final">
-                    {match.score.Home} – {match.score.Away}
+                    {isLive ? (live.tick?.score.Home ?? 0) : match.score.Home} –{' '}
+                    {isLive ? (live.tick?.score.Away ?? 0) : match.score.Away}
+                    {isLive && (
+                      <span className="clock">
+                        {live.status === 'done' ? 'FT' : live.tick ? `${live.tick.minute}'` : 'Kick-off'}
+                      </span>
+                    )}
                   </span>
                   <span className="team away">{match.away_team}</span>
                 </section>
@@ -262,7 +369,7 @@ export default function App() {
                     </button>
                   ))}
                 </div>
-                <label className="language" data-tooltip="Recap language">
+                <label className="language">
                   <GlobeIcon />
                   <select
                     aria-label="Recap language"
@@ -282,7 +389,7 @@ export default function App() {
                     className="passcode"
                     onSubmit={(e) => {
                       e.preventDefault()
-                      void generate(passcode)
+                      void (askPasscode === 'live' ? startLive(true, passcode) : generate(passcode))
                     }}
                   >
                     <label htmlFor="passcode">Demo passcode</label>
@@ -298,11 +405,43 @@ export default function App() {
                       Run agents
                     </button>
                   </form>
+                ) : isLive ? (
+                  <div className="live-actions">
+                    {live.status === 'playing' ? (
+                      <button type="button" className="primary" onClick={stopLive}>
+                        ■ Stop
+                      </button>
+                    ) : (
+                      <>
+                        <label className="speed">
+                          <select
+                            aria-label="Playback speed"
+                            value={speed}
+                            onChange={(e) => setSpeed(Number(e.target.value))}
+                          >
+                            {SPEEDS.map(([label, value]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          className="primary"
+                          onClick={() => void startLive(false)}
+                          disabled={loading || !matchId}
+                        >
+                          ▶ Watch live
+                        </button>
+                      </>
+                    )}
+                  </div>
                 ) : (
                   <button
                     type="button"
                     className="primary"
-                    onClick={() => (passcode ? void generate() : setAskPasscode(true))}
+                    onClick={() => (passcode ? void generate() : setAskPasscode('recap'))}
                     disabled={running || loading || !matchId}
                   >
                     {running ? 'Agents at work…' : result ? 'Regenerate recap' : 'Generate recap'}
@@ -311,23 +450,61 @@ export default function App() {
               </section>
 
               {loading && !running && <span className="skeleton stage-skeleton" aria-hidden="true" />}
-              {(running || result) && <Pipeline state={result && !running ? doneState(result.rewrites) : pipeline} />}
+              {isLive && !loading && match && (
+                <LiveStats tick={live.tick} teams={{ home: match.home_team, away: match.away_team }} />
+              )}
+              {!isLive && (running || result) && (
+                <Pipeline state={result && !running ? doneState(result.rewrites) : pipeline} />
+              )}
             </div>
             <div className="stage-pitch">
-              <Pitch events={match && selected ? sentenceEvents(match, selected) : []} replay={replay} />
-              {match && selected && sentenceEvents(match, selected).length > 0 && (
+              <Pitch
+                events={pitchEvents}
+                replay={isLive && !liveSelected ? (live.tick?.minute ?? 0) : replay}
+                live={isLive && !liveSelected}
+              />
+              {(!isLive || liveSelected) && pitchEvents.length > 0 && (
                 <button type="button" className="replay" onClick={() => setReplay((n) => n + 1)}>
                   ↻ Replay
                 </button>
               )}
-              {!loading && pitchNote(running, result !== null, selected, match) && (
-                <p className="stage-pitch-note">{pitchNote(running, result !== null, selected, match)}</p>
-              )}
+              {!loading && note && <p className="stage-pitch-note">{note}</p>}
             </div>
           </section>
           {error && <p className="error">{error}</p>}
 
-          {loading && !running ? (
+          {isLive && !loading && match && liveMatch ? (
+            <div className="recap-grid">
+              <div className="recap-column">
+                <LiveNotice
+                  live={live}
+                  onCommentate={() => (passcode ? void startLive(true) : setAskPasscode('live'))}
+                />
+                <LiveFeed
+                  feed={live.feed}
+                  mode={live.commentary}
+                  playing={live.status === 'playing'}
+                  events={live.events}
+                  teams={{ home: match.home_team, away: match.away_team }}
+                  selected={liveSelected?.sentence ?? null}
+                  onSelect={(sentence, item) => setLiveSelected({ sentence, item })}
+                />
+              </div>
+              <aside aria-label="Evidence">
+                {liveSelected ? (
+                  <Evidence
+                    sentence={liveSelected.sentence}
+                    match={liveMatch}
+                    stats={liveSelected.item.commentary?.stats ?? null}
+                    comparisons={[]}
+                    asOfMinute={liveSelected.item.moment.minute}
+                  />
+                ) : (
+                  <p className="muted">Click a comment to see what proves it, as it stood at that minute.</p>
+                )}
+              </aside>
+            </div>
+          ) : loading && !running ? (
             <>
               <p className="visually-hidden" role="status">
                 Loading
@@ -399,6 +576,37 @@ function GlobeIcon() {
       <path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z" />
     </svg>
   )
+}
+
+/** What the live view is doing, and the button to have the agents commentate. */
+function LiveNotice({ live, onCommentate }: { live: LiveState; onCommentate: () => void }) {
+  const playing = live.status === 'playing'
+  const text =
+    live.status === 'idle'
+      ? 'Watch the match as it happens: events arrive minute by minute, the stats update from code, and every key moment gets a verified comment.'
+      : live.commentary === 'live'
+        ? 'The Commentator and Verifier agents are commentating live. Each comment is checked against the events so far.'
+        : live.commentary === 'saved'
+          ? 'Replaying commentary the agents wrote and the Verifier checked during an earlier live run.'
+          : 'Live stats only: no commentary is saved for this style and language yet.'
+  return (
+    <div className="live-notice">
+      <p>{text}</p>
+      {!playing && live.status !== 'idle' && (
+        <button type="button" className="secondary" onClick={onCommentate}>
+          {live.commentary === 'none' ? 'Commentate with the agents' : 'Commentate again'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** The pitch hint in live mode (null while it shows events). */
+function livePitchNote(live: LiveState, hasSelection: boolean) {
+  if (hasSelection) return null
+  if (live.status === 'idle') return 'Press Watch live: the match plays minute by minute.'
+  if (!live.tick?.events.length && live.status === 'playing') return 'No events this minute.'
+  return null
 }
 
 /** The hint shown on the pitch when it has no events to draw (null when it has some). */

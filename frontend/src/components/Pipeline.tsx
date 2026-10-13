@@ -5,27 +5,14 @@ const LABELS: Record<string, [string, string, string]> = {
   analyst: [
     'Analyst',
     'calls the stats tools',
-    'Works out what mattered in the match by calling Python stats tools (possession, shots, goals, ' +
-      'counterattacks). It never calculates anything itself, and every finding names the events that prove it.',
+    'Finds what mattered using Python stats tools. Never does the maths itself.',
   ],
-  retrieval: [
-    'Retrieval',
-    'vector search in Cosmos DB',
-    "Finds similar moments in other matches: each goal and counterattack is described in words, turned into " +
-      'a vector by an embedding model, and matched with vector search in Cosmos DB. Runs at the same time as ' +
-      'the Analyst.',
-  ],
-  narrator: [
-    'Narrator',
-    'writes the recap',
-    "Writes the recap in the chosen persona's voice, using only the Analyst's and Retrieval's findings. " +
-      'It cites finding numbers, and code attaches the real evidence, so links to proof can never be made up.',
-  ],
+  retrieval: ['Retrieval', 'vector search in Cosmos DB', 'Finds similar moments in other matches with vector search.'],
+  narrator: ['Narrator', 'writes the recap', 'Writes in the chosen voice, citing a finding for every sentence.'],
   verifier: [
     'Verifier',
     'fact-checks every sentence',
-    "Checks every sentence against that sentence's own evidence. Anything unproven goes back to the Narrator " +
-      'for a rewrite (at most 2); whatever still fails is removed, so only verified sentences are shown.',
+    'Checks each sentence against its evidence; sends failures back.',
   ],
 }
 
@@ -53,7 +40,9 @@ export function Pipeline({ state }: { state: PipelineState }) {
         <Step id="analyst" status={steps.analyst} />
         <Step id="retrieval" status={steps.retrieval} />
       </div>
-      <span className="pipeline-arrow" aria-hidden="true">→</span>
+      <span className="pipeline-arrow" aria-hidden="true">
+        →
+      </span>
       <Step id="narrator" status={steps.narrator} note={rewrites ? `rewrite ${rewrites}` : undefined} />
       <span className="pipeline-arrow loop" aria-hidden="true" title="Rejected sentences go back for a rewrite">
         ⇄

@@ -1,19 +1,10 @@
 import type { RecapSentence, VerifiedRecap } from '../api'
+import { evidenceLabel } from '../matchEvents'
 
 interface RecapViewProps {
   result: VerifiedRecap
   selected: RecapSentence | null
   onSelect: (sentence: RecapSentence) => void
-}
-
-function evidenceLabel(sentence: RecapSentence): string {
-  const parts: string[] = []
-  if (sentence.event_ids.length)
-    parts.push(`${sentence.event_ids.length} event${sentence.event_ids.length === 1 ? '' : 's'}`)
-  if (sentence.tools.includes('find_similar_moments')) parts.push('other matches')
-  const stats = sentence.tools.filter((t) => t !== 'find_similar_moments').length
-  if (stats) parts.push(`${stats} stat${stats === 1 ? '' : 's'}`)
-  return parts.join(' · ')
 }
 
 /** The verified recap. Every sentence is a button: click it to see what proves it. */

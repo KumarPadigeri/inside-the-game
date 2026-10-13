@@ -1,9 +1,11 @@
 """Tests for the Cosmos DB document conversions (no Azure calls)."""
 
 from inside_the_game.generator import generate_match
+from inside_the_game.live import LiveCommentary
 from inside_the_game.narrator import Recap, RecapSentence
 from inside_the_game.store import (
     attach_recap_styles,
+    commentary_to_doc,
     doc_to_match,
     doc_to_recap,
     match_to_doc,
@@ -69,3 +71,9 @@ def test_match_summaries_list_their_saved_recaps() -> None:
         },
         {"match_id": "match_002", "recaps": []},
     ]
+
+
+def test_live_commentary_documents_use_the_recap_ids() -> None:
+    doc = commentary_to_doc("match_002", LiveCommentary(style="fan", language="hi", lines=[]))
+    assert doc["id"] == "match_002-fan-hi" and doc["match_id"] == "match_002"
+    assert LiveCommentary.model_validate(doc).language == "hi"

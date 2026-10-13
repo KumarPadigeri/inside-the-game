@@ -6,9 +6,10 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from inside_the_game import workflow
+from inside_the_game import commentator, workflow
 from inside_the_game.api import create_app
 from inside_the_game.generator import Match, generate_match
+from inside_the_game.live import Commentary, LiveCommentary, LiveMoment, detect_moments
 from inside_the_game.narrator import Language, Recap, RecapSentence, Style
 from inside_the_game.verifier import VerifiedRecap
 from inside_the_game.workflow import Progress
@@ -23,6 +24,7 @@ RECAP = VerifiedRecap(
 class FakeStore:
     def __init__(self) -> None:
         self.recaps: dict[tuple[str, str, str], VerifiedRecap] = {}
+        self.commentary: dict[tuple[str, str, str], LiveCommentary] = {}
 
     async def list_matches(self) -> list[dict[str, Any]]:
         return [{"match_id": MATCH.match_id, "home_team": MATCH.home_team, "away_team": MATCH.away_team}]
@@ -35,6 +37,12 @@ class FakeStore:
 
     async def save_recap(self, match_id: str, result: VerifiedRecap) -> None:
         self.recaps[(match_id, result.recap.style, result.recap.language)] = result
+
+    async def get_commentary(self, match_id: str, style: Style, language: Language = "en") -> LiveCommentary | None:
+        return self.commentary.get((match_id, style, language))
+
+    async def save_commentary(self, match_id: str, commentary: LiveCommentary) -> None:
+        self.commentary[(match_id, commentary.style, commentary.language)] = commentary
 
 
 @pytest.fixture
@@ -147,3 +155,51 @@ def test_generating_is_disabled_in_azure_without_a_passcode(
     response = client.post("/api/matches/match_005/recaps/fan")
     assert response.status_code == 403
     assert "disabled" in response.json()["detail"]
+
+
+def _sse(body: str) -> list[str]:
+    return [line.removeprefix("event: ").strip() for line in body.splitlines() if line.startswith("event: ")]
+
+
+def _goal_line(moment: LiveMoment) -> Commentary:
+    return Commentary(moment=moment, sentences=[SENTENCE], stats={})
+
+
+def test_watching_live_is_free_and_streams_the_overlay_feed(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RECAP_PASSCODE", "open-sesame")  # not needed to watch
+    body = client.get("/api/matches/match_005/live/fan?seconds_per_minute=0").text
+    events = _sse(body)
+    assert events[0] == "start" and events[-1] == "done"
+    assert "tick" in events and "moment" in events
+    assert '"commentary": "none"' in body and "event: commentary" not in body
+    assert client.get("/api/matches/match_005/live/fan?seconds_per_minute=9").status_code == 422
+
+
+def test_saved_commentary_is_replayed_live(client: TestClient, store: FakeStore) -> None:
+    first_goal = detect_moments(MATCH, set())[0]
+    store.commentary[("match_005", "fan", "en")] = LiveCommentary(style="fan", lines=[_goal_line(first_goal)])
+    body = client.get("/api/matches/match_005/live/fan?seconds_per_minute=0").text
+    assert '"commentary": "saved"' in body
+    assert _sse(body).count("commentary") == 1
+    assert client.get("/api/matches/match_005/live/fan?language=es&seconds_per_minute=0").text.count(
+        "event: commentary"
+    ) == 0  # no Spanish run saved
+
+
+def test_live_commentary_needs_the_passcode_and_is_saved(
+    client: TestClient, store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_make_commentator(style: Style, language: Language):  # type: ignore[no-untyped-def]
+        async def commentate(match_so_far: Match, moment: LiveMoment) -> Commentary | None:
+            return _goal_line(moment) if moment.kind == "goal" else None
+
+        return commentate
+
+    monkeypatch.setattr(commentator, "make_commentator", fake_make_commentator)
+    monkeypatch.setenv("RECAP_PASSCODE", "open-sesame")
+    url = "/api/matches/match_005/live/fan?language=es&seconds_per_minute=0"
+    assert client.post(url).status_code == 403
+    body = client.post(url, headers={"X-Recap-Passcode": "open-sesame"}).text
+    assert _sse(body).count("commentary") == MATCH.score()["Home"] + MATCH.score()["Away"]
+    saved = store.commentary[("match_005", "fan", "es")]
+    assert [line.moment.kind for line in saved.lines] == ["goal"] * 5

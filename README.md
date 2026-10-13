@@ -132,6 +132,8 @@ The backend is a FastAPI app ([api.py](inside_the_game/api.py)) on Azure Contain
 | `GET` | `/api/matches/{match_id}/stats` | The stats tool results the agents saw | 200, 404 |
 | `GET` | `/api/matches/{match_id}/recaps/{style}` | A saved, verified recap | 200, 404 (not generated yet), 422 (bad style or language) |
 | `POST` | `/api/matches/{match_id}/recaps/{style}` | Runs the four agents; streams progress, then the recap | 200 (stream), 403 (passcode), 404, 422 |
+| `GET` | `/api/matches/{match_id}/live/{style}` | Plays the match live: the overlay feed, with saved commentary if any (free, no AI) | 200 (stream), 404, 422 |
+| `POST` | `/api/matches/{match_id}/live/{style}` | Plays it live while the Commentator and Verifier agents commentate; saves the run | 200 (stream), 403 (passcode), 404, 422 |
 
 Path parameters: `match_id` is `match_001` … `match_030`; `style` is `fan`, `analyst` or `broadcaster`.
 Both recap endpoints take an optional `?language=` query parameter: `en` (default), `es`, `fr`, `pt` or `hi`.
@@ -224,6 +226,36 @@ curl -N -X POST -H "X-Recap-Passcode: <passcode>" \
 Without the right passcode the server answers `403 {"detail": "Generating recaps needs the demo passcode"}`.
 Browsers can only call the API from the deployed UI and `http://localhost:5173` (CORS).
 
+### Live mode: `GET` / `POST /api/matches/{match_id}/live/{style}`
+
+Plays the match minute by minute, as if its events were arriving now. Every minute the backend ingests that minute's
+events, recomputes the stats on everything so far (the same deterministic tools the Analyst uses) and detects key
+moments. Nothing from later in the match is ever used. Query parameters: `language` (as above) and
+`seconds_per_minute` (0–5, default 1: a match plays in about a minute and a half).
+
+- `GET` is free for everyone: live stats from code, plus commentary from an earlier run if one is saved.
+- `POST` (needs the passcode) has the **Commentator** agent explain each moment in one or two sentences, and the
+  **Verifier** check them against the evidence *as of that minute*: one rewrite, then anything unproven is dropped.
+  The clock never waits for the agents: commentary follows its moment a little later. The run is saved, so later
+  `GET`s replay it for free.
+
+The response is a timed, machine-readable **overlay feed** (Server-Sent Events): every message carries its match
+minute, so it can drive on-screen graphics alongside a match.
+
+```text
+event: start       {"match_id": "match_002", "style": "broadcaster", "language": "en", "commentary": "saved"}
+event: tick        {"minute": 16, "score": {"Home": 2, "Away": 1}, "possession": {"Home": 45.4, "Away": 54.6},
+                    "passes_completed": {...}, "shots": {...}, "on_target": {...}, "events": [ ...this minute... ]}
+event: moment      {"key": "goal-188", "kind": "goal", "minute": 16, "team": "Away", "event_ids": [180, ..., 188]}
+event: commentary  {"moment": {...}, "sentences": [{"text": "A6 pulls one back...", "event_ids": [...],
+                    "tools": ["get_goals"]}], "stats": { ...tool results at that minute... }, "rewrites": 0,
+                    "removed": []}
+event: done        {"minute": 91, "score": {"Home": 2, "Away": 1}}
+```
+
+`kind` is `goal`, `counterattack`, `half-time` or `full-time`. `commentary` is `saved` (replaying), `none` (stats
+only) or `live` (agents commentating now).
+
 ## Project layout
 
 ```
@@ -234,7 +266,8 @@ inside_the_game/
   verifier.py    Verifier agent + checks    workflow.py   the Agent Framework workflow
   store.py       Cosmos DB access           api.py        FastAPI backend
   foundry.py     Foundry clients, auth      tracing.py    Azure Monitor tracing
-  pregenerate.py demo recap generation
+  pregenerate.py demo recap generation      live.py       live feed: minute-by-minute stats + moments
+  commentator.py Commentator agent + its Commentator/Verifier workflow
 frontend/        React + TypeScript UI (Vite)
 tests/           pytest suite (fakes for agents, no network)
 .github/         CI (tests, build, lint) and the frontend deployment

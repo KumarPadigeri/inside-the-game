@@ -126,12 +126,17 @@ def comparison_evidence(comparisons: list[Comparison]) -> list[dict[str, Any]]:
     ]
 
 
-def build_prompt(match: Match, recap: Recap, comparisons: list[Comparison] | None = None) -> str:
-    """Each sentence with only its own evidence: cited tool results and events."""
+def build_prompt(
+    match: Match, recap: Recap, comparisons: list[Comparison] | None = None, context: str = ""
+) -> str:
+    """Each sentence with only its own evidence: cited tool results and events.
+
+    `context` is an extra note for the Verifier (e.g. that live stats cover only the match so far).
+    """
     tool_results: dict[str, Any] = {t.name: t.func() for t in build_tools(match)}
     tool_results[SIMILAR_MOMENTS_TOOL] = comparison_evidence(comparisons or [])
     events = {e.event_id: asdict(e) for e in match.events}
-    blocks = [f"Home team: {match.home_team}. Away team: {match.away_team}."]
+    blocks = [f"Home team: {match.home_team}. Away team: {match.away_team}.", *filter(None, [context])]
     for number, sentence in enumerate(numbered_sentences(recap)):
         evidence = {
             "tool_results": {name: tool_results[name] for name in sentence.tools if name in tool_results},
@@ -274,9 +279,11 @@ def make_verifier(client: FoundryChatClient | None = None) -> Agent:
     )
 
 
-async def verify(match: Match, recap: Recap, comparisons: list[Comparison] | None = None) -> list[SentenceVerdict]:
+async def verify(
+    match: Match, recap: Recap, comparisons: list[Comparison] | None = None, context: str = ""
+) -> list[SentenceVerdict]:
     """Run the Verifier and return one verdict per sentence (headline first)."""
-    response = await make_verifier().run(build_prompt(match, recap, comparisons))
+    response = await make_verifier().run(build_prompt(match, recap, comparisons, context))
     output = response.value
     if output is None:
         raise ValueError(f"Verifier returned no structured verdicts: {response.text!r}")

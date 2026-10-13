@@ -4,6 +4,7 @@ Containers (all partitioned by /match_id):
     matches - one document per synthetic match, events included
     recaps  - one document per (match, style, language) verified recap
     moments - goals and counterattacks with embedding vectors, for vector search
+    commentary - one saved live-mode run per (match, style, language), for free replays
 
 Auth uses Entra ID (your `az login` locally, the managed identity in Azure);
 key-based access is disabled on the account, so there are no secrets to manage.
@@ -26,6 +27,7 @@ from dotenv import load_dotenv
 
 from inside_the_game.foundry import make_async_credential
 from inside_the_game.generator import Match, generate_match
+from inside_the_game.live import LiveCommentary
 from inside_the_game.moments import Moment
 from inside_the_game.narrator import Language, Style
 from inside_the_game.verifier import VerifiedRecap
@@ -77,6 +79,16 @@ def doc_to_recap(doc: dict[str, Any]) -> VerifiedRecap:
     return VerifiedRecap.model_validate(doc)
 
 
+def commentary_to_doc(match_id: str, commentary: LiveCommentary) -> dict[str, Any]:
+    """A live run's commentary as a Cosmos document, one per match, style and language."""
+    return {
+        "id": recap_id(match_id, commentary.style, commentary.language),
+        "match_id": match_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        **commentary.model_dump(),
+    }
+
+
 def moment_to_doc(moment: Moment, embedding: list[float]) -> dict[str, Any]:
     return {"id": moment.moment_id, **moment.model_dump(), "embedding": embedding}
 
@@ -102,6 +114,7 @@ class Store:
         self.matches: ContainerProxy = db.get_container_client("matches")
         self.recaps: ContainerProxy = db.get_container_client("recaps")
         self.moments: ContainerProxy = db.get_container_client("moments")
+        self.commentary: ContainerProxy = db.get_container_client("commentary")
 
     async def __aenter__(self) -> Store:
         return self
@@ -133,6 +146,16 @@ class Store:
         try:
             doc = await self.recaps.read_item(recap_id(match_id, style, language), partition_key=match_id)
             return doc_to_recap(doc)
+        except CosmosResourceNotFoundError:
+            return None
+
+    async def save_commentary(self, match_id: str, commentary: LiveCommentary) -> None:
+        await self.commentary.upsert_item(commentary_to_doc(match_id, commentary))
+
+    async def get_commentary(self, match_id: str, style: Style, language: Language = "en") -> LiveCommentary | None:
+        try:
+            doc = await self.commentary.read_item(recap_id(match_id, style, language), partition_key=match_id)
+            return LiveCommentary.model_validate(doc)
         except CosmosResourceNotFoundError:
             return None
 

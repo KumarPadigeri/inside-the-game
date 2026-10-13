@@ -7,7 +7,12 @@
     GET  /api/matches/{match_id}/recaps/{style}    a saved verified recap
     POST /api/matches/{match_id}/recaps/{style}    run the agents; streams progress
                                                    (Server-Sent Events), then saves
-    Both recap endpoints take ?language=en|es|fr|pt|hi (default en).
+    GET  /api/matches/{match_id}/live/{style}      play the match live (SSE overlay feed), replaying
+                                                   saved commentary if there is any; free, no AI
+    POST /api/matches/{match_id}/live/{style}      play it live with fresh commentary from the
+                                                   Commentator and Verifier agents, then save it
+    Recap and live endpoints take ?language=en|es|fr|pt|hi (default en);
+    live ones also take ?seconds_per_minute= (default 1).
 
 Generating calls the AI models (it costs credit), so the POST needs the
 X-Recap-Passcode header to match RECAP_PASSCODE. Reading is open to everyone.
@@ -23,20 +28,21 @@ import hmac
 import json
 import logging
 import os
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from typing import Any, Protocol
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from sse_starlette.sse import EventSourceResponse
 
-from inside_the_game import workflow
+from inside_the_game import live, workflow
 from inside_the_game.analyst import build_tools
 from inside_the_game.foundry import running_in_azure
 from inside_the_game.generator import Match
+from inside_the_game.live import LiveCommentary
 from inside_the_game.narrator import Language, Style
 from inside_the_game.verifier import VerifiedRecap
 
@@ -62,6 +68,8 @@ class MatchStore(Protocol):
     async def get_match(self, match_id: str) -> Match | None: ...
     async def get_recap(self, match_id: str, style: Style, language: Language = "en") -> VerifiedRecap | None: ...
     async def save_recap(self, match_id: str, result: VerifiedRecap) -> None: ...
+    async def get_commentary(self, match_id: str, style: Style, language: Language = "en") -> LiveCommentary | None: ...
+    async def save_commentary(self, match_id: str, commentary: LiveCommentary) -> None: ...
 
 
 def create_app(store: MatchStore | None = None) -> FastAPI:
@@ -152,6 +160,70 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
                 yield {"event": "error", "data": json.dumps({"detail": str(error)})}
 
         return EventSourceResponse(events())
+
+    SecondsPerMinute = Query(default=1.0, ge=0, le=5, description="Playback speed: seconds per match minute")
+
+    def live_events(
+        match: Match,
+        commentator: live.Commentator | None,
+        seconds_per_minute: float,
+        start: dict[str, Any],
+        on_done: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None,
+    ) -> EventSourceResponse:
+        """Stream the live feed as Server-Sent Events: start, then tick / moment / commentary, then done."""
+
+        async def events() -> AsyncIterator[dict[str, str]]:
+            yield {"event": "start", "data": json.dumps(start)}
+            lines: list[dict[str, Any]] = []
+            try:
+                async for kind, data in live.run_live(match, commentator, seconds_per_minute):
+                    if kind == "commentary":
+                        lines.append(data)
+                    if kind == "done" and on_done is not None:
+                        await on_done(lines)
+                    yield {"event": kind, "data": json.dumps(data)}
+            except Exception as error:  # noqa: BLE001 - report any failure to the UI
+                logging.exception("Live feed failed for %s", match.match_id)
+                yield {"event": "error", "data": json.dumps({"detail": str(error)})}
+
+        return EventSourceResponse(events())
+
+    @app.get("/api/matches/{match_id}/live/{style}")
+    async def watch_live(
+        request: Request,
+        match_id: str,
+        style: Style,
+        language: Language = "en",
+        seconds_per_minute: float = SecondsPerMinute,
+    ) -> EventSourceResponse:
+        """Free for everyone: live stats from code, plus saved commentary if this match has some."""
+        match = await require_match(request, match_id)
+        saved = await get_store(request).get_commentary(match_id, style, language)
+        commentator = live.replay_commentator(saved) if saved else None
+        start = {"match_id": match_id, "style": style, "language": language, "commentary": "saved" if saved else "none"}
+        return live_events(match, commentator, seconds_per_minute, start)
+
+    @app.post("/api/matches/{match_id}/live/{style}")
+    async def generate_live(
+        request: Request,
+        match_id: str,
+        style: Style,
+        language: Language = "en",
+        seconds_per_minute: float = SecondsPerMinute,
+        passcode: str | None = Header(default=None, alias=PASSCODE_HEADER),
+    ) -> EventSourceResponse:
+        """Live with fresh commentary from the agents (needs the passcode); saved for free replays."""
+        check_passcode(passcode)
+        match = await require_match(request, match_id)
+        store_ = get_store(request)
+        from inside_the_game.commentator import make_commentator  # loads the agents only when needed
+
+        async def save(lines: list[dict[str, Any]]) -> None:
+            if lines:
+                await store_.save_commentary(match_id, live.collect(lines, style, language))
+
+        start = {"match_id": match_id, "style": style, "language": language, "commentary": "live"}
+        return live_events(match, make_commentator(style, language), seconds_per_minute, start, on_done=save)
 
     return app
 

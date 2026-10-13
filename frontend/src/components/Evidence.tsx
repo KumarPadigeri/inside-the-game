@@ -6,6 +6,8 @@ interface EvidenceProps {
   match: Match
   stats: Stats | null
   comparisons: Comparison[]
+  /** Live commentary: the stats are as they stood at this minute, not at full time. */
+  asOfMinute?: number
 }
 
 const teamName = (match: Match, team: Team) => (team === 'Home' ? match.home_team : match.away_team)
@@ -63,7 +65,7 @@ function SideBySide({ match, rows }: { match: Match; rows: [string, string | num
 }
 
 /** The tool result a sentence cites, shown the way the agents saw it. */
-function ToolEvidence({ tool, match, stats, comparisons, sentence }: { tool: string } & EvidenceProps) {
+function ToolEvidence({ tool, match, stats, comparisons, sentence, asOfMinute }: { tool: string } & EvidenceProps) {
   if (tool === 'find_similar_moments') {
     const relevant = comparisons.filter((c) => c.event_ids.some((id) => sentence.event_ids.includes(id)))
     return (
@@ -98,7 +100,7 @@ function ToolEvidence({ tool, match, stats, comparisons, sentence }: { tool: str
       const { final_score: score } = stats.get_match_info
       return (
         <section>
-          <h4>Final score</h4>
+          <h4>{asOfMinute === undefined ? 'Final score' : `Score at ${asOfMinute}'`}</h4>
           <p className="big-score">
             {match.home_team} {score.Home} – {score.Away} {match.away_team}
           </p>
@@ -187,6 +189,9 @@ export function Evidence(props: EvidenceProps) {
     <div className="evidence">
       <div className="evidence-pinned">
         <p className="evidence-quote">“{sentence.text}”</p>
+        {props.asOfMinute !== undefined && (
+          <p className="muted evidence-asof">Evidence as it stood at minute {props.asOfMinute}: nothing later.</p>
+        )}
       </div>
       <div className="evidence-scroll">
         {events.length > 0 && (

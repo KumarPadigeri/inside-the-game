@@ -44,16 +44,18 @@ interface PitchProps {
   events: MatchEvent[]
   /** Change this number to play the ball replay again. */
   replay?: number
+  /** Live mode: the latest minute's moves, no numbers or replay; the ball sits where play is now. */
+  live?: boolean
 }
 
 /**
  * The events behind a sentence, numbered in order and joined into the path of each attack.
  * A ball then replays each move (SVG animation), with a pulse where a goal was scored.
  */
-export function Pitch({ events, replay = 0 }: PitchProps) {
+export function Pitch({ events, replay = 0, live = false }: PitchProps) {
   const points = events.map(position)
   const groups = moves(events)
-  const animate = !prefersReducedMotion() && events.length > 0
+  const animate = !live && !prefersReducedMotion() && events.length > 0
 
   // When each move starts, so the moves play one after another.
   let clock = 0.3
@@ -97,9 +99,11 @@ export function Pitch({ events, replay = 0 }: PitchProps) {
           >
             <circle cx={x} cy={y} r={isGoal(event) ? 2.6 : event.type === 'shot' ? 2.1 : 1.6} />
             {/* Number above the dot, or below it when the dot is near the top touchline. */}
-            <text x={x} y={y < 5 ? y + 5.2 : y - 3}>
-              {i + 1}
-            </text>
+            {!live && (
+              <text x={x} y={y < 5 ? y + 5.2 : y - 3}>
+                {i + 1}
+              </text>
+            )}
             <title>{`${event.minute}' ${event.player} ${event.type} (${event.outcome})`}</title>
           </g>
         )
@@ -131,6 +135,9 @@ export function Pitch({ events, replay = 0 }: PitchProps) {
             </g>
           )
         })}
+      {live && points.length > 0 && (
+        <circle className="pitch-ball" cx={points[points.length - 1][0]} cy={points[points.length - 1][1]} r={1.4} />
+      )}
       <text className="pitch-caption" x={W - 1} y={H - 1.5}>
         Home attacks →
       </text>
