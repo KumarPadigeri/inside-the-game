@@ -115,16 +115,110 @@ counterattacks. Each event looks like this:
 
 ## API
 
-| Endpoint | |
-|---|---|
-| `GET /api/matches` | Match summaries |
-| `GET /api/matches/{id}` | A match with all its events |
-| `GET /api/matches/{id}/stats` | The tool results the agents saw |
-| `GET /api/matches/{id}/recaps/{style}` | A saved verified recap |
-| `POST /api/matches/{id}/recaps/{style}` | Run the agents, streaming progress as Server-Sent Events, then save |
+The backend is a FastAPI app ([api.py](inside_the_game/api.py)) on Azure Container Apps.
 
-Generating a recap calls the models, so on the public deployment it requires a demo passcode
-(`X-Recap-Passcode`, stored as a Container Apps secret). Everything else is open.
+- **Base URL:** `https://inside-the-game-api.ambitiousforest-f9db213d.eastus2.azurecontainerapps.io`
+- **Interactive docs:** [`/docs`](https://inside-the-game-api.ambitiousforest-f9db213d.eastus2.azurecontainerapps.io/docs)
+  (Swagger UI) and the OpenAPI schema at `/openapi.json`, both generated from the code.
+- **Reading is open; generating is protected.** Every `GET` is public. The `POST` that runs the agents calls the
+  AI models (it costs credit), so it needs the demo passcode in an `X-Recap-Passcode` header.
+- **Errors** are JSON: `{"detail": "No match 'match_999'"}`.
+
+| Method | Path | What it returns | Status codes |
+|---|---|---|---|
+| `GET` | `/api/health` | `{"status": "ok"}` | 200 |
+| `GET` | `/api/matches` | Summary of every match, with the styles that already have a recap | 200 |
+| `GET` | `/api/matches/{match_id}` | One match with all its events | 200, 404 |
+| `GET` | `/api/matches/{match_id}/stats` | The stats tool results the agents saw | 200, 404 |
+| `GET` | `/api/matches/{match_id}/recaps/{style}` | A saved, verified recap | 200, 404 (not generated yet), 422 (bad style) |
+| `POST` | `/api/matches/{match_id}/recaps/{style}` | Runs the four agents; streams progress, then the recap | 200 (stream), 403 (passcode), 404, 422 |
+
+Path parameters: `match_id` is `match_001` … `match_030`; `style` is `fan`, `analyst` or `broadcaster`.
+
+### `GET /api/matches`
+
+```json
+[{"match_id": "match_005", "home_team": "Ashvale Town", "away_team": "Harbourside City",
+  "score": {"Home": 3, "Away": 2}, "recaps": ["analyst", "broadcaster", "fan"]}, ...]
+```
+
+### `GET /api/matches/{match_id}`
+
+The match and all its events (about 1,200). The UI looks up a sentence's `event_ids` here.
+
+```json
+{"match_id": "match_005", "seed": 5, "home_team": "Ashvale Town", "away_team": "Harbourside City",
+ "score": {"Home": 3, "Away": 2},
+ "events": [{"event_id": 1, "minute": 0, "team": "Home", "player": "H9", "type": "kickoff",
+             "x": 50, "y": 50, "outcome": "complete", "possession_id": 1}, ...]}
+```
+
+### `GET /api/matches/{match_id}/stats`
+
+The exact results of the Analyst's tools, keyed by tool name. Sentences about totals cite these.
+
+```json
+{"get_match_info": {"home_team": "...", "away_team": "...", "final_score": {"Home": 3, "Away": 2}},
+ "get_possession": {"Home": {"percent": 50.9, "passes_attempted": 484, "passes_completed": 402,
+                             "pass_accuracy": 83.1}, "Away": {...}},
+ "get_shots": {"Home": {"total": 16, "on_target": 9, "goals": 3, "saved": 6, "missed": 4, "blocked": 3,
+                        "event_ids": [...]}, "Away": {...}},
+ "get_goals": [{"event_id": 198, "minute": 16, "team": "Home", "player": "H10", "score_after": "1-0",
+                "buildup_event_ids": [193, 194, 195, 196, 197, 198]}, ...],
+ "get_counterattacks": [{"possession_id": 47, "team": "Home", "minute": 16, "won_by": "tackle",
+                         "won_at_x": 49, "passes": 4, "outcome": "goal", "event_ids": [...]}, ...]}
+```
+
+### `GET /api/matches/{match_id}/recaps/{style}`
+
+A verified recap. Every sentence carries its evidence: `event_ids` (moments in this match) and `tools`
+(stats, or `find_similar_moments` for comparisons with other matches).
+
+```json
+{"recap": {"style": "fan",
+           "headline": {"text": "Ashvale Town roared back to beat Harbourside City 3-2...",
+                        "finding_ids": [1, 3], "event_ids": [833, 1024], "tools": ["get_match_info", "get_goals"]},
+           "sentences": [{"text": "Ashvale Town led 1-0 through H10...", "finding_ids": [2],
+                          "event_ids": [198, 667, 829], "tools": ["get_goals"]}, ...]},
+ "comparisons": [{"claim": "...", "moment": {"moment_id": "match_005-p47", "minute": 16, "kind": "counterattack goal",
+                                             "description": "..."},
+                  "similar": [{"moment_id": "match_029-p120", "home_team": "Riverside Athletic",
+                               "away_team": "Eastmoor United", "minute": 31, "similarity": 0.985, ...}],
+                  "event_ids": [...]}],
+ "rewrites": 1,
+ "rejections": [{"draft": 0, "text": "...", "problem": "why the Verifier sent it back"}],
+ "removed": [{"text": "...", "problem": "why it was dropped after the last rewrite"}]}
+```
+
+### `POST /api/matches/{match_id}/recaps/{style}`
+
+Runs the workflow (Analyst and Retrieval in parallel, then Narrator and Verifier) and saves the result, replacing any
+earlier recap for that match and style. It takes one to two minutes, so the response is a
+[Server-Sent Events](https://developer.mozilla.org/docs/Web/API/Server-sent_events) stream:
+
+```text
+event: progress
+data: {"step": "analyst", "status": "started", "detail": ""}
+
+event: progress
+data: {"step": "narrator", "status": "started", "detail": "rewrite 1"}
+
+event: recap
+data: { ...the same verified recap as the GET above... }
+```
+
+- `progress`: a step started or finished. `step` is `start`, `analyst`, `retrieval`, `narrator` or `verifier`;
+  `detail` says which rewrite the Narrator is on.
+- `recap`: the final verified recap (sent once, at the end).
+- `error`: `{"detail": "..."}` if the run failed.
+
+```bash
+curl -N -X POST -H "X-Recap-Passcode: <passcode>" \
+  https://inside-the-game-api.ambitiousforest-f9db213d.eastus2.azurecontainerapps.io/api/matches/match_007/recaps/fan
+```
+
+Without the right passcode the server answers `403 {"detail": "Generating recaps needs the demo passcode"}`.
+Browsers can only call the API from the deployed UI and `http://localhost:5173` (CORS).
 
 ## Project layout
 

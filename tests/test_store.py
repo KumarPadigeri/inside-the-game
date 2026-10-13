@@ -2,7 +2,7 @@
 
 from inside_the_game.generator import generate_match
 from inside_the_game.narrator import Recap, RecapSentence
-from inside_the_game.store import doc_to_match, doc_to_recap, match_to_doc, recap_to_doc
+from inside_the_game.store import attach_recap_styles, doc_to_match, doc_to_recap, match_to_doc, recap_to_doc
 from inside_the_game.verifier import Rejection, VerifiedRecap
 
 
@@ -27,3 +27,16 @@ def test_recap_round_trips_through_a_document() -> None:
     assert doc["match_id"] == "match_003"
     assert "created_at" in doc
     assert doc_to_recap(doc) == result
+
+
+def test_match_summaries_list_their_saved_recap_styles() -> None:
+    matches = [{"match_id": "match_001"}, {"match_id": "match_002"}]
+    rows = [
+        {"match_id": "match_001", "style": "fan"},
+        {"match_id": "match_001", "style": "analyst"},
+        {"match_id": "match_009", "style": "fan"},  # a recap for a match not in the list is ignored
+    ]
+    assert attach_recap_styles(matches, rows) == [
+        {"match_id": "match_001", "recaps": ["analyst", "fan"]},
+        {"match_id": "match_002", "recaps": []},
+    ]

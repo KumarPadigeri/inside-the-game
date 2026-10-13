@@ -42,6 +42,14 @@ def doc_to_match(doc: dict[str, Any]) -> Match:
     return Match.from_dict(doc)
 
 
+def attach_recap_styles(matches: list[dict[str, Any]], recap_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add a sorted "recaps" list (the styles with a saved recap) to each match summary."""
+    styles: dict[str, set[str]] = {}
+    for row in recap_rows:
+        styles.setdefault(row["match_id"], set()).add(row["style"])
+    return [{**match, "recaps": sorted(styles.get(match["match_id"], set()))} for match in matches]
+
+
 def recap_id(match_id: str, style: Style) -> str:
     return f"{match_id}-{style}"
 
@@ -104,9 +112,11 @@ class Store:
             return None
 
     async def list_matches(self) -> list[dict[str, Any]]:
-        """Match summaries (no events), ordered by match_id."""
+        """Match summaries (no events), ordered by match_id, with the styles that have a saved recap."""
         query = "SELECT c.match_id, c.home_team, c.away_team, c.score FROM c ORDER BY c.match_id"
-        return [item async for item in self.matches.query_items(query)]
+        matches = [item async for item in self.matches.query_items(query)]
+        recap_rows = [item async for item in self.recaps.query_items("SELECT c.match_id, c.style FROM c")]
+        return attach_recap_styles(matches, recap_rows)
 
     async def save_recap(self, match_id: str, result: VerifiedRecap) -> None:
         await self.recaps.upsert_item(recap_to_doc(match_id, result))
