@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from inside_the_game import workflow
 from inside_the_game.api import create_app
 from inside_the_game.generator import Match, generate_match
-from inside_the_game.narrator import Recap, RecapSentence, Style
+from inside_the_game.narrator import Language, Recap, RecapSentence, Style
 from inside_the_game.verifier import VerifiedRecap
 from inside_the_game.workflow import Progress
 
@@ -22,7 +22,7 @@ RECAP = VerifiedRecap(
 
 class FakeStore:
     def __init__(self) -> None:
-        self.recaps: dict[tuple[str, str], VerifiedRecap] = {}
+        self.recaps: dict[tuple[str, str, str], VerifiedRecap] = {}
 
     async def list_matches(self) -> list[dict[str, Any]]:
         return [{"match_id": MATCH.match_id, "home_team": MATCH.home_team, "away_team": MATCH.away_team}]
@@ -30,11 +30,11 @@ class FakeStore:
     async def get_match(self, match_id: str) -> Match | None:
         return MATCH if match_id == MATCH.match_id else None
 
-    async def get_recap(self, match_id: str, style: Style) -> VerifiedRecap | None:
-        return self.recaps.get((match_id, style))
+    async def get_recap(self, match_id: str, style: Style, language: Language = "en") -> VerifiedRecap | None:
+        return self.recaps.get((match_id, style, language))
 
     async def save_recap(self, match_id: str, result: VerifiedRecap) -> None:
-        self.recaps[(match_id, result.recap.style)] = result
+        self.recaps[(match_id, result.recap.style, result.recap.language)] = result
 
 
 @pytest.fixture
@@ -73,12 +73,13 @@ def test_unknown_match_is_404(client: TestClient) -> None:
 def test_missing_recap_is_404_and_bad_style_is_422(client: TestClient) -> None:
     assert client.get("/api/matches/match_005/recaps/fan").status_code == 404
     assert client.get("/api/matches/match_005/recaps/poetry").status_code == 422
+    assert client.get("/api/matches/match_005/recaps/fan?language=klingon").status_code == 422
 
 
 def test_create_recap_streams_progress_then_saves(
     client: TestClient, store: FakeStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def fake_stream(match: Match, style: Style) -> AsyncIterator[Progress | VerifiedRecap]:
+    async def fake_stream(match: Match, style: Style, language: Language) -> AsyncIterator[Progress | VerifiedRecap]:
         yield Progress(step="analyst", status="started")
         yield Progress(step="analyst", status="finished")
         yield RECAP
@@ -88,12 +89,30 @@ def test_create_recap_streams_progress_then_saves(
     body = client.post("/api/matches/match_005/recaps/fan").text
     assert body.index("event: progress") < body.index("event: recap")
     assert '"step": "analyst"' in body
-    assert store.recaps[("match_005", "fan")] == RECAP
+    assert store.recaps[("match_005", "fan", "en")] == RECAP
     assert client.get("/api/matches/match_005/recaps/fan").json()["recap"]["headline"]["text"] == "Ashvale won."
 
 
+def test_language_reaches_the_workflow_and_picks_the_saved_recap(
+    client: TestClient, store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spanish = RECAP.model_copy(update={"recap": RECAP.recap.model_copy(update={"language": "es"})})
+    asked: list[str] = []
+
+    async def fake_stream(match: Match, style: Style, language: Language) -> AsyncIterator[Progress | VerifiedRecap]:
+        asked.append(language)
+        yield spanish
+
+    monkeypatch.setattr(workflow, "stream_recap", fake_stream)
+
+    client.post("/api/matches/match_005/recaps/fan?language=es")
+    assert asked == ["es"]
+    assert client.get("/api/matches/match_005/recaps/fan?language=es").json()["recap"]["language"] == "es"
+    assert client.get("/api/matches/match_005/recaps/fan").status_code == 404  # no English recap saved
+
+
 def test_create_recap_reports_errors_in_the_stream(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def failing_stream(match: Match, style: Style) -> AsyncIterator[Progress | VerifiedRecap]:
+    async def failing_stream(match: Match, style: Style, language: Language) -> AsyncIterator[Progress | VerifiedRecap]:
         yield Progress(step="analyst", status="started")
         raise RuntimeError("model unavailable")
 
@@ -106,7 +125,7 @@ def test_create_recap_reports_errors_in_the_stream(client: TestClient, monkeypat
 def test_generating_needs_the_passcode_when_one_is_set(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def fake_stream(match: Match, style: Style) -> AsyncIterator[Progress | VerifiedRecap]:
+    async def fake_stream(match: Match, style: Style, language: Language) -> AsyncIterator[Progress | VerifiedRecap]:
         yield RECAP
 
     monkeypatch.setattr(workflow, "stream_recap", fake_stream)

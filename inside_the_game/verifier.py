@@ -66,6 +66,9 @@ goal (0) toward the goal it attacks (100), so x < 50 is the team's own half.
 minute counts from 0; the second half starts at minute 45. Goal scores in
 tool results (score_after) are in Home-Away order.
 
+Sentences may be in a language other than English: check their facts in
+exactly the same way. Always write "reasoning" and "problem" in English.
+
 For an unsupported sentence, state in "problem" exactly what is wrong and what
 the evidence actually shows.
 """
@@ -169,9 +172,13 @@ _LEAKS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+# An English ordinal ("16th") left in a recap written in another language.
+_ENGLISH_ORDINAL = re.compile(r"\b\d+(?:st|nd|rd|th)\b")
+
+
 def style_problems(recap: Recap, comparisons: list[Comparison] | None = None) -> dict[int, str]:
     """Code checks on the wording (not the facts): leaked internals, overlong sentences,
-    and comparison sentences that don't name the other match.
+    comparison sentences that don't name the other match, and English left in other languages.
 
     Returns {sentence number: problem}, with 0 = headline.
     """
@@ -180,6 +187,8 @@ def style_problems(recap: Recap, comparisons: list[Comparison] | None = None) ->
     for number, sentence in enumerate(numbered_sentences(recap)):
         found = [problem for pattern, problem in _LEAKS if pattern.search(sentence.text)]
         words = len(sentence.text.split())
+        if recap.language != "en" and (ordinal := _ENGLISH_ORDINAL.search(sentence.text)):
+            found.append(f'leaves English ("{ordinal.group()}") untranslated')
         if words > MAX_SENTENCE_WORDS:
             found.append(f"is too long ({words} words, max {MAX_SENTENCE_WORDS}); split it or cut it down")
         cites_comparison = SIMILAR_MOMENTS_TOOL in sentence.tools
@@ -247,7 +256,7 @@ def finalize(
         else:
             removed.append(RemovedSentence(text=sentence.text, problem=verdict.problem))
     return VerifiedRecap(
-        recap=Recap(style=recap.style, headline=headline, sentences=kept),
+        recap=Recap(style=recap.style, language=recap.language, headline=headline, sentences=kept),
         comparisons=comparisons or [],
         rewrites=rewrites,
         rejections=rejections or [],

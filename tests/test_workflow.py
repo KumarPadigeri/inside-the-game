@@ -8,7 +8,7 @@ from inside_the_game import analyst, narrator, retrieval, verifier
 from inside_the_game.analyst import AnalystReport, Finding
 from inside_the_game.generator import Match, generate_match
 from inside_the_game.moments import Comparison, extract_moments
-from inside_the_game.narrator import Recap, RecapSentence, Style
+from inside_the_game.narrator import Language, Recap, RecapSentence, Style
 from inside_the_game.verifier import MAX_REWRITES, SentenceVerdict
 from inside_the_game.workflow import run_recap
 
@@ -41,8 +41,11 @@ def _install_fakes(
         calls.append("analyse")
         return FAKE_REPORT
 
-    async def fake_narrate(match: Match, report: AnalystReport, style: Style, feedback: str | None = None) -> Recap:
+    async def fake_narrate(
+        match: Match, report: AnalystReport, style: Style, feedback: str | None = None, language: Language = "en"
+    ) -> Recap:
         calls.append("rewrite" if feedback else "narrate")
+        seen.setdefault("languages", []).append(language)  # type: ignore[union-attr]
         assert report.findings[0] == FAKE_REPORT.findings[0]  # the Analyst's output reached the Narrator
         seen["findings"] = [f.claim for f in report.findings]
         n = calls.count("narrate") + calls.count("rewrite")
@@ -50,7 +53,7 @@ def _install_fakes(
         if narrator_cites_comparisons and any(f.tool == retrieval.TOOL_NAME for f in report.findings):
             tools.append(retrieval.TOOL_NAME)
         sentence = RecapSentence(text=f"Draft {n}.", finding_ids=[1], event_ids=[], tools=tools)
-        return Recap(style=style, headline=sentence, sentences=[sentence])
+        return Recap(style=style, language=language, headline=sentence, sentences=[sentence])
 
     async def fake_verify(match: Match, recap: Recap, comparisons: list[Comparison] | None = None) -> list[SentenceVerdict]:
         calls.append("verify")
@@ -121,3 +124,10 @@ def test_recap_without_any_comparison_is_sent_back(monkeypatch: pytest.MonkeyPat
     assert calls.count("rewrite") == MAX_REWRITES  # sent back each time, then accepted as is
     assert [r.text for r in result.rejections] == ["(whole recap)"] * MAX_REWRITES
     assert result.removed == []  # every sentence was still true
+
+
+def test_language_reaches_every_narrator_call_and_the_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, seen = _install_fakes(monkeypatch, [[True, False], [True, True]])
+    result = asyncio.run(run_recap(MATCH, "fan", "es"))
+    assert seen["languages"] == ["es", "es"]  # first draft and the rewrite
+    assert result.recap.language == "es"

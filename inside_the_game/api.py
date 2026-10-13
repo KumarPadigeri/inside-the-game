@@ -7,6 +7,7 @@
     GET  /api/matches/{match_id}/recaps/{style}    a saved verified recap
     POST /api/matches/{match_id}/recaps/{style}    run the agents; streams progress
                                                    (Server-Sent Events), then saves
+    Both recap endpoints take ?language=en|es|fr|pt|hi (default en).
 
 Generating calls the AI models (it costs credit), so the POST needs the
 X-Recap-Passcode header to match RECAP_PASSCODE. Reading is open to everyone.
@@ -36,7 +37,7 @@ from inside_the_game import workflow
 from inside_the_game.analyst import build_tools
 from inside_the_game.foundry import running_in_azure
 from inside_the_game.generator import Match
-from inside_the_game.narrator import Style
+from inside_the_game.narrator import Language, Style
 from inside_the_game.verifier import VerifiedRecap
 
 
@@ -59,7 +60,7 @@ class MatchStore(Protocol):
 
     async def list_matches(self) -> list[dict[str, Any]]: ...
     async def get_match(self, match_id: str) -> Match | None: ...
-    async def get_recap(self, match_id: str, style: Style) -> VerifiedRecap | None: ...
+    async def get_recap(self, match_id: str, style: Style, language: Language = "en") -> VerifiedRecap | None: ...
     async def save_recap(self, match_id: str, result: VerifiedRecap) -> None: ...
 
 
@@ -120,10 +121,10 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
         return {t.name: t.func() for t in build_tools(match)}
 
     @app.get("/api/matches/{match_id}/recaps/{style}")
-    async def get_recap(request: Request, match_id: str, style: Style) -> VerifiedRecap:
-        recap = await get_store(request).get_recap(match_id, style)
+    async def get_recap(request: Request, match_id: str, style: Style, language: Language = "en") -> VerifiedRecap:
+        recap = await get_store(request).get_recap(match_id, style, language)
         if recap is None:
-            raise HTTPException(status_code=404, detail=f"No {style} recap for {match_id!r} yet")
+            raise HTTPException(status_code=404, detail=f"No {style} recap in {language!r} for {match_id!r} yet")
         return recap
 
     @app.post("/api/matches/{match_id}/recaps/{style}")
@@ -131,6 +132,7 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
         request: Request,
         match_id: str,
         style: Style,
+        language: Language = "en",
         passcode: str | None = Header(default=None, alias=PASSCODE_HEADER),
     ) -> EventSourceResponse:
         check_passcode(passcode)
@@ -139,14 +141,14 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
 
         async def events() -> AsyncIterator[dict[str, str]]:
             try:
-                async for item in workflow.stream_recap(match, style):
+                async for item in workflow.stream_recap(match, style, language):
                     if isinstance(item, VerifiedRecap):
                         await store_.save_recap(match_id, item)
                         yield {"event": "recap", "data": item.model_dump_json()}
                     else:
                         yield {"event": "progress", "data": json.dumps(asdict(item))}
             except Exception as error:  # noqa: BLE001 - report any failure to the UI
-                logging.exception("Recap failed for %s (%s)", match_id, style)
+                logging.exception("Recap failed for %s (%s, %s)", match_id, style, language)
                 yield {"event": "error", "data": json.dumps({"detail": str(error)})}
 
         return EventSourceResponse(events())

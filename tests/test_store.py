@@ -2,7 +2,14 @@
 
 from inside_the_game.generator import generate_match
 from inside_the_game.narrator import Recap, RecapSentence
-from inside_the_game.store import attach_recap_styles, doc_to_match, doc_to_recap, match_to_doc, recap_to_doc
+from inside_the_game.store import (
+    attach_recap_styles,
+    doc_to_match,
+    doc_to_recap,
+    match_to_doc,
+    recap_id,
+    recap_to_doc,
+)
 from inside_the_game.verifier import Rejection, VerifiedRecap
 
 
@@ -25,18 +32,40 @@ def test_recap_round_trips_through_a_document() -> None:
     doc = recap_to_doc("match_003", result)
     assert doc["id"] == "match_003-analyst"
     assert doc["match_id"] == "match_003"
+    assert doc["language"] == "en"
     assert "created_at" in doc
     assert doc_to_recap(doc) == result
 
 
-def test_match_summaries_list_their_saved_recap_styles() -> None:
+def test_english_keeps_the_original_recap_id_and_other_languages_add_theirs() -> None:
+    assert recap_id("match_003", "fan") == "match_003-fan"
+    assert recap_id("match_003", "fan", "en") == "match_003-fan"
+    assert recap_id("match_003", "fan", "es") == "match_003-fan-es"
+
+
+def test_recap_saved_before_languages_existed_reads_as_english() -> None:
+    sentence = RecapSentence(text="H9 scored.", finding_ids=[1], event_ids=[42], tools=["get_goals"])
+    old = {"recap": {"style": "fan", "headline": sentence.model_dump(), "sentences": []}, "rewrites": 0,
+           "rejections": [], "removed": []}
+    assert doc_to_recap(old).recap.language == "en"
+
+
+def test_match_summaries_list_their_saved_recaps() -> None:
     matches = [{"match_id": "match_001"}, {"match_id": "match_002"}]
     rows = [
-        {"match_id": "match_001", "style": "fan"},
-        {"match_id": "match_001", "style": "analyst"},
+        {"match_id": "match_001", "style": "fan"},  # saved before languages existed: English
+        {"match_id": "match_001", "style": "analyst", "language": "en"},
+        {"match_id": "match_001", "style": "fan", "language": "es"},
         {"match_id": "match_009", "style": "fan"},  # a recap for a match not in the list is ignored
     ]
     assert attach_recap_styles(matches, rows) == [
-        {"match_id": "match_001", "recaps": ["analyst", "fan"]},
+        {
+            "match_id": "match_001",
+            "recaps": [
+                {"style": "analyst", "language": "en"},
+                {"style": "fan", "language": "en"},
+                {"style": "fan", "language": "es"},
+            ],
+        },
         {"match_id": "match_002", "recaps": []},
     ]

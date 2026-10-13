@@ -2,7 +2,7 @@
 
 Containers (all partitioned by /match_id):
     matches - one document per synthetic match, events included
-    recaps  - one document per (match, style) verified recap
+    recaps  - one document per (match, style, language) verified recap
     moments - goals and counterattacks with embedding vectors, for vector search
 
 Auth uses Entra ID (your `az login` locally, the managed identity in Azure);
@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 from inside_the_game.foundry import make_async_credential
 from inside_the_game.generator import Match, generate_match
 from inside_the_game.moments import Moment
-from inside_the_game.narrator import Style
+from inside_the_game.narrator import Language, Style
 from inside_the_game.verifier import VerifiedRecap
 
 # --- document conversion (pure, no Azure) ---------------------------------
@@ -43,23 +43,31 @@ def doc_to_match(doc: dict[str, Any]) -> Match:
 
 
 def attach_recap_styles(matches: list[dict[str, Any]], recap_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Add a sorted "recaps" list (the styles with a saved recap) to each match summary."""
-    styles: dict[str, set[str]] = {}
+    """Add a sorted "recaps" list ({style, language} of each saved recap) to each match summary.
+
+    Recaps saved before languages existed have no language field: they are English.
+    """
+    saved: dict[str, set[tuple[str, str]]] = {}
     for row in recap_rows:
-        styles.setdefault(row["match_id"], set()).add(row["style"])
-    return [{**match, "recaps": sorted(styles.get(match["match_id"], set()))} for match in matches]
+        saved.setdefault(row["match_id"], set()).add((row["style"], row.get("language", "en")))
+    return [
+        {**match, "recaps": [{"style": s, "language": lang} for s, lang in sorted(saved.get(match["match_id"], set()))]}
+        for match in matches
+    ]
 
 
-def recap_id(match_id: str, style: Style) -> str:
-    return f"{match_id}-{style}"
+def recap_id(match_id: str, style: Style, language: Language = "en") -> str:
+    """English keeps the original id (match_001-fan); other languages add theirs (match_001-fan-es)."""
+    return f"{match_id}-{style}" if language == "en" else f"{match_id}-{style}-{language}"
 
 
 def recap_to_doc(match_id: str, result: VerifiedRecap) -> dict[str, Any]:
-    """A verified recap as a Cosmos document, one per match and style."""
+    """A verified recap as a Cosmos document, one per match, style and language."""
     return {
-        "id": recap_id(match_id, result.recap.style),
+        "id": recap_id(match_id, result.recap.style, result.recap.language),
         "match_id": match_id,
         "style": result.recap.style,
+        "language": result.recap.language,
         "created_at": datetime.now(timezone.utc).isoformat(),
         **result.model_dump(),
     }
@@ -112,18 +120,18 @@ class Store:
             return None
 
     async def list_matches(self) -> list[dict[str, Any]]:
-        """Match summaries (no events), ordered by match_id, with the styles that have a saved recap."""
+        """Match summaries (no events), ordered by match_id, with the recaps saved for each."""
         query = "SELECT c.match_id, c.home_team, c.away_team, c.score FROM c ORDER BY c.match_id"
         matches = [item async for item in self.matches.query_items(query)]
-        recap_rows = [item async for item in self.recaps.query_items("SELECT c.match_id, c.style FROM c")]
+        recap_rows = [item async for item in self.recaps.query_items("SELECT c.match_id, c.style, c.language FROM c")]
         return attach_recap_styles(matches, recap_rows)
 
     async def save_recap(self, match_id: str, result: VerifiedRecap) -> None:
         await self.recaps.upsert_item(recap_to_doc(match_id, result))
 
-    async def get_recap(self, match_id: str, style: Style) -> VerifiedRecap | None:
+    async def get_recap(self, match_id: str, style: Style, language: Language = "en") -> VerifiedRecap | None:
         try:
-            doc = await self.recaps.read_item(recap_id(match_id, style), partition_key=match_id)
+            doc = await self.recaps.read_item(recap_id(match_id, style, language), partition_key=match_id)
             return doc_to_recap(doc)
         except CosmosResourceNotFoundError:
             return None

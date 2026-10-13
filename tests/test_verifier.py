@@ -148,3 +148,12 @@ def test_comparison_with_home_and_away_swapped_is_caught() -> None:
     swapped = _sentence(f"As in {other.away_team} v {other.home_team}.", tools=["find_similar_moments"])
     recap = Recap(style="fan", headline=_sentence("Great win!"), sentences=[swapped])
     assert 1 in style_problems(recap, [comparison])
+
+
+def test_style_checks_catch_english_left_in_another_language() -> None:
+    recap = _recap_of("Victoria ajustada.", "A6 marcó en el 16th minute.", "A6 marcó en el minuto 16.")
+    spanish = recap.model_copy(update={"language": "es"})
+    problems = style_problems(spanish)
+    assert set(problems) == {1}
+    assert '"16th"' in problems[1]
+    assert style_problems(recap.model_copy(update={"sentences": [_sentence("H9 scored in the 16th minute.")]})) == {}

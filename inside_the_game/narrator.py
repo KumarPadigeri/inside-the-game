@@ -5,7 +5,7 @@ those numbers for every sentence it writes. Code then maps each sentence to
 the event_ids behind its findings, so evidence links can never be invented.
 
 Usage:
-    python -m inside_the_game.narrator --seed 5 --style fan
+    python -m inside_the_game.narrator --seed 5 --style fan [--language es]
 """
 
 from __future__ import annotations
@@ -25,6 +25,17 @@ from inside_the_game.generator import Match, generate_match
 from inside_the_game.moments import SIMILAR_MOMENTS_TOOL
 
 Style = Literal["fan", "analyst", "broadcaster"]
+
+Language = Literal["en", "es", "fr", "pt", "hi"]
+
+# Each language by its English name (for the prompt). The facts stay the same in every language.
+LANGUAGES: dict[Language, str] = {
+    "en": "English",
+    "es": "Spanish",
+    "fr": "French",
+    "pt": "Portuguese",
+    "hi": "Hindi",
+}
 
 STYLE_GUIDES: dict[Style, str] = {
     "fan": "Write as a passionate supporter of the winning team (or the home team after a draw): "
@@ -80,12 +91,27 @@ class RecapSentence(BaseModel):
 
 class Recap(BaseModel):
     style: Style
+    language: Language = "en"  # recaps saved before languages existed are English
     headline: RecapSentence
     sentences: list[RecapSentence]
 
 
-def build_prompt(match: Match, report: AnalystReport, style: Style, feedback: str | None = None) -> str:
-    """The message sent to the Narrator: style, teams and numbered findings (no event_ids).
+def language_rule(language: Language) -> str:
+    """How to write in a language other than English, keeping every name and number checkable."""
+    if language == "en":
+        return ""
+    return (
+        f"Language: write the headline and every sentence in {LANGUAGES[language]}. "
+        "Keep team names, player ids (e.g. H9) and other match names (\"X v Y\") exactly as given, "
+        "untranslated, and write numbers with the digits 0-9. "
+        'Translate every other word, including minutes: never copy English such as "16th minute".\n'
+    )
+
+
+def build_prompt(
+    match: Match, report: AnalystReport, style: Style, feedback: str | None = None, language: Language = "en"
+) -> str:
+    """The message sent to the Narrator: style, language, teams and numbered findings (no event_ids).
 
     `feedback` is the Verifier's list of problems, when asking for a rewrite.
     """
@@ -95,6 +121,7 @@ def build_prompt(match: Match, report: AnalystReport, style: Style, feedback: st
     ]
     prompt = (
         f"Style: {STYLE_GUIDES[style]}\n"
+        f"{language_rule(language)}"
         f"Home team: {match.home_team}. Away team: {match.away_team}.\n"
         f"Findings:\n{json.dumps(findings, indent=1)}"
     )
@@ -107,7 +134,9 @@ def build_prompt(match: Match, report: AnalystReport, style: Style, feedback: st
     return prompt
 
 
-def resolve_recap(output: NarratorOutput, report: AnalystReport, style: Style) -> Recap:
+def resolve_recap(
+    output: NarratorOutput, report: AnalystReport, style: Style, language: Language = "en"
+) -> Recap:
     """Attach the real evidence (event_ids and tools) to each sentence, via the findings it cites."""
 
     def resolve(sentence: NarratedSentence) -> RecapSentence:
@@ -127,6 +156,7 @@ def resolve_recap(output: NarratorOutput, report: AnalystReport, style: Style) -
 
     return Recap(
         style=style,
+        language=language,
         headline=resolve(output.headline),
         sentences=[resolve(s) for s in output.sentences],
     )
@@ -142,26 +172,29 @@ def make_narrator(client: FoundryChatClient | None = None) -> Agent:
     )
 
 
-async def narrate(match: Match, report: AnalystReport, style: Style, feedback: str | None = None) -> Recap:
+async def narrate(
+    match: Match, report: AnalystReport, style: Style, feedback: str | None = None, language: Language = "en"
+) -> Recap:
     """Run the Narrator and return a recap with evidence attached to every sentence."""
-    response = await make_narrator().run(build_prompt(match, report, style, feedback))
+    response = await make_narrator().run(build_prompt(match, report, style, feedback, language))
     output = response.value
     if output is None:
         raise ValueError(f"Narrator returned no structured recap: {response.text!r}")
-    return resolve_recap(output, report, style)
+    return resolve_recap(output, report, style, language)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Analyse a synthetic match, then narrate it.")
     parser.add_argument("--seed", type=int, default=1, help="which synthetic match")
     parser.add_argument("--style", choices=list(STYLE_GUIDES), default="broadcaster")
+    parser.add_argument("--language", choices=list(LANGUAGES), default="en")
     args = parser.parse_args()
 
     match = generate_match(args.seed)
 
     async def run() -> Recap:
         report = await analyse(match)
-        return await narrate(match, report, args.style)
+        return await narrate(match, report, args.style, language=args.language)
 
     recap = asyncio.run(run())
     print(f"# {recap.headline.text}\n")

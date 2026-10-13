@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  LANGUAGES,
   PasscodeError,
   STYLES,
   generateRecap,
@@ -7,6 +8,7 @@ import {
   getRecap,
   getStats,
   listMatches,
+  type Language,
   type Match,
   type MatchSummary,
   type RecapSentence,
@@ -24,6 +26,7 @@ import { FactCheckLog, RecapView } from './components/RecapView'
 import { sentenceEvents } from './matchEvents'
 import { PERSONAS } from './personas'
 import { applyTheme, loadTheme, type Theme } from './theme'
+import { loadLanguage, saveLanguage } from './language'
 import { EMPTY_PIPELINE, applyProgress, type PipelineState } from './pipelineState'
 
 const PASSCODE_KEY = 'itg-demo-passcode'
@@ -50,6 +53,7 @@ export default function App() {
   const [matches, setMatches] = useState<MatchSummary[]>([])
   const [matchId, setMatchId] = useState<string | null>(null)
   const [style, setStyle] = useState<Style>('broadcaster')
+  const [language, setLanguage] = useState<Language>(loadLanguage)
   const [match, setMatch] = useState<Match | null>(null)
   const [stats, setStats] = useState<Stats | null>(null)
   const [result, setResult] = useState<VerifiedRecap | null>(null)
@@ -87,11 +91,11 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [])
 
-  // Load the match, its stats and any saved recap whenever the match or style changes.
+  // Load the match, its stats and any saved recap whenever the match, style or language changes.
   useEffect(() => {
     if (!matchId) return
     let cancelled = false
-    Promise.all([getMatch(matchId), getStats(matchId), getRecap(matchId, style)])
+    Promise.all([getMatch(matchId), getStats(matchId), getRecap(matchId, style, language)])
       .then(([m, s, r]) => {
         if (cancelled) return
         setMatch(m)
@@ -104,7 +108,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [matchId, style])
+  }, [matchId, style, language])
 
   /** Clear what belongs to the previous match or style before switching. */
   function resetView() {
@@ -129,6 +133,14 @@ export default function App() {
     setStyle(next)
   }
 
+  function chooseLanguage(next: Language) {
+    if (next === language) return
+    resetView()
+    setLoading(true)
+    setLanguage(next)
+    saveLanguage(next)
+  }
+
   async function generate(code = passcode) {
     if (!matchId) return
     setAskPasscode(false)
@@ -136,14 +148,18 @@ export default function App() {
     setError(null)
     resetView()
     try {
-      const recap = await generateRecap(matchId, style, code, (p) => setPipeline((state) => applyProgress(state, p)))
+      const recap = await generateRecap(matchId, style, language, code, (p) =>
+        setPipeline((state) => applyProgress(state, p)),
+      )
       setResult(recap)
       setSelected(recap.recap.headline)
       savePasscode(code)
       // Mark the new recap in the match list.
       setMatches((list) =>
         list.map((m) =>
-          m.match_id === matchId ? { ...m, recaps: [...new Set([...(m.recaps ?? []), style])].sort() } : m,
+          m.match_id === matchId && !hasRecap(m, style, language)
+            ? { ...m, recaps: [...(m.recaps ?? []), { style, language }] }
+            : m,
         ),
       )
     } catch (e) {
@@ -153,7 +169,7 @@ export default function App() {
         setAskPasscode(true)
         // Bring back the saved recap (if any) that was cleared when we started.
         if (matchId) {
-          getRecap(matchId, style)
+          getRecap(matchId, style, language)
             .then((r) => setResult(r))
             .catch(() => {})
         }
@@ -199,7 +215,7 @@ export default function App() {
                     {m.home_team}
                     <br />
                     {m.away_team}
-                    <RecapMarks styles={m.recaps ?? []} />
+                    <RecapMarks styles={STYLES.filter((s) => hasRecap(m, s, language))} language={language} />
                   </span>
                   <span className="score">
                     {m.score.Home}
@@ -246,6 +262,21 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+                <label className="language" data-tooltip="Recap language">
+                  <GlobeIcon />
+                  <select
+                    aria-label="Recap language"
+                    value={language}
+                    onChange={(e) => chooseLanguage(e.target.value as Language)}
+                    disabled={running}
+                  >
+                    {Object.entries(LANGUAGES).map(([code, name]) => (
+                      <option key={code} value={code}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 {askPasscode ? (
                   <form
                     className="passcode"
@@ -320,8 +351,8 @@ export default function App() {
           ) : (
             !running && (
               <p className="empty">
-                No {style} recap for this match yet. Generating one runs the four agents live (it takes a minute or two)
-                and needs the demo passcode.
+                No {style} recap ({LANGUAGES[language]}) for this match yet. Generating one runs the four agents live
+                (it takes a minute or two) and needs the demo passcode.
               </p>
             )
           )}
@@ -331,14 +362,18 @@ export default function App() {
   )
 }
 
-/** Small persona icons on a match card: lit for each style that already has a recap. */
-function RecapMarks({ styles }: { styles: Style[] }) {
+function hasRecap(match: MatchSummary, style: Style, language: Language): boolean {
+  return (match.recaps ?? []).some((r) => r.style === style && r.language === language)
+}
+
+/** Small persona icons on a match card: lit for each style that has a recap in the chosen language. */
+function RecapMarks({ styles, language }: { styles: Style[]; language: Language }) {
   return (
     // Described with a label, not hidden text: a positioned hidden element escapes the scrolling match strip.
     <span
       className="recap-marks"
       role="img"
-      aria-label={styles.length ? `Recaps: ${styles.join(', ')}` : 'No recaps yet'}
+      aria-label={styles.length ? `${LANGUAGES[language]} recaps: ${styles.join(', ')}` : 'No recaps yet'}
     >
       {STYLES.map((s) => (
         <span key={s} className={styles.includes(s) ? 'has' : undefined}>
@@ -346,6 +381,23 @@ function RecapMarks({ styles }: { styles: Style[] }) {
         </span>
       ))}
     </span>
+  )
+}
+
+function GlobeIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z" />
+    </svg>
   )
 }
 

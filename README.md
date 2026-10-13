@@ -3,7 +3,7 @@
 **Football match recaps where every sentence shows its proof.**
 
 Four AI agents turn the raw event data of a (synthetic) football match into a readable recap, in a fan,
-analyst or broadcaster voice. Every sentence links to the evidence behind it: click it and you see the
+analyst or broadcaster voice, in English, Spanish, French, Portuguese or Hindi. Every sentence links to the evidence behind it: click it and you see the
 events on a pitch, the statistics, or similar moments from other matches. A Verifier agent fact-checks
 each sentence against that evidence and sends anything unproven back for a rewrite.
 
@@ -95,7 +95,7 @@ Other useful commands:
 | Command | What it does |
 |---|---|
 | `python -m inside_the_game.generator --count 5` | Write synthetic matches to `data/matches/` |
-| `python -m inside_the_game.pregenerate --count 5` | Pre-generate recaps for the demo (add `--redo-removed` to retry ones that lost sentences) |
+| `python -m inside_the_game.pregenerate --count 5` | Pre-generate recaps for the demo (add `--redo-removed` to retry ones that lost sentences, `--languages es fr` for other languages) |
 | `python -m inside_the_game.workflow --diagram` | Print the workflow graph as Mermaid |
 | `TRACING=1 python -m inside_the_game.workflow ...` | Send traces to Application Insights from your machine |
 | `pytest` | 74 tests; no Azure or model calls needed |
@@ -127,19 +127,23 @@ The backend is a FastAPI app ([api.py](inside_the_game/api.py)) on Azure Contain
 | Method | Path | What it returns | Status codes |
 |---|---|---|---|
 | `GET` | `/api/health` | `{"status": "ok"}` | 200 |
-| `GET` | `/api/matches` | Summary of every match, with the styles that already have a recap | 200 |
+| `GET` | `/api/matches` | Summary of every match, with the recaps already saved for it | 200 |
 | `GET` | `/api/matches/{match_id}` | One match with all its events | 200, 404 |
 | `GET` | `/api/matches/{match_id}/stats` | The stats tool results the agents saw | 200, 404 |
-| `GET` | `/api/matches/{match_id}/recaps/{style}` | A saved, verified recap | 200, 404 (not generated yet), 422 (bad style) |
+| `GET` | `/api/matches/{match_id}/recaps/{style}` | A saved, verified recap | 200, 404 (not generated yet), 422 (bad style or language) |
 | `POST` | `/api/matches/{match_id}/recaps/{style}` | Runs the four agents; streams progress, then the recap | 200 (stream), 403 (passcode), 404, 422 |
 
 Path parameters: `match_id` is `match_001` … `match_030`; `style` is `fan`, `analyst` or `broadcaster`.
+Both recap endpoints take an optional `?language=` query parameter: `en` (default), `es`, `fr`, `pt` or `hi`.
+The Narrator writes in that language and the Verifier checks it against the same evidence; team names, player ids
+and numbers stay exactly as in the data.
 
 ### `GET /api/matches`
 
 ```json
 [{"match_id": "match_005", "home_team": "Ashvale Town", "away_team": "Harbourside City",
-  "score": {"Home": 3, "Away": 2}, "recaps": ["analyst", "broadcaster", "fan"]}, ...]
+  "score": {"Home": 3, "Away": 2},
+  "recaps": [{"style": "analyst", "language": "en"}, {"style": "fan", "language": "es"}, ...]}, ...]
 ```
 
 ### `GET /api/matches/{match_id}`
@@ -175,7 +179,7 @@ A verified recap. Every sentence carries its evidence: `event_ids` (moments in t
 (stats, or `find_similar_moments` for comparisons with other matches).
 
 ```json
-{"recap": {"style": "fan",
+{"recap": {"style": "fan", "language": "en",
            "headline": {"text": "Ashvale Town roared back to beat Harbourside City 3-2...",
                         "finding_ids": [1, 3], "event_ids": [833, 1024], "tools": ["get_match_info", "get_goals"]},
            "sentences": [{"text": "Ashvale Town led 1-0 through H10...", "finding_ids": [2],
@@ -193,7 +197,7 @@ A verified recap. Every sentence carries its evidence: `event_ids` (moments in t
 ### `POST /api/matches/{match_id}/recaps/{style}`
 
 Runs the workflow (Analyst and Retrieval in parallel, then Narrator and Verifier) and saves the result, replacing any
-earlier recap for that match and style. It takes one to two minutes, so the response is a
+earlier recap for that match, style and language. It takes one to two minutes, so the response is a
 [Server-Sent Events](https://developer.mozilla.org/docs/Web/API/Server-sent_events) stream:
 
 ```text

@@ -13,7 +13,7 @@ Narrator with the problems it found, or (after MAX_REWRITES) removes the
 sentences that still fail.
 
 Usage:
-    python -m inside_the_game.workflow --seed 5 --style broadcaster [--save]
+    python -m inside_the_game.workflow --seed 5 --style broadcaster [--language es] [--save]
 """
 
 import argparse
@@ -30,17 +30,18 @@ from inside_the_game import analyst, narrator, retrieval, verifier
 from inside_the_game.analyst import AnalystReport
 from inside_the_game.generator import Match, generate_match
 from inside_the_game.moments import Comparison
-from inside_the_game.narrator import STYLE_GUIDES, Recap, Style
+from inside_the_game.narrator import LANGUAGES, STYLE_GUIDES, Language, Recap, Style
 from inside_the_game.tracing import setup_tracing
 from inside_the_game.verifier import MAX_REWRITES, Rejection, VerifiedRecap
 
 
 @dataclass
 class RecapRequest:
-    """Workflow input: which match to recap, and in which style."""
+    """Workflow input: which match to recap, in which style and language."""
 
     match: Match
     style: Style
+    language: Language = "en"
 
 
 @dataclass
@@ -53,6 +54,7 @@ class Analysis:
     match: Match
     style: Style
     report: AnalystReport
+    language: Language = "en"
     comparisons: list[Comparison] = field(default_factory=list)
 
 
@@ -97,7 +99,9 @@ class AnalystExecutor(Executor):
     @handler
     async def analyse(self, request: RecapRequest, ctx: WorkflowContext[Analysis]) -> None:
         report = await analyst.analyse(request.match)
-        await ctx.send_message(Analysis(match=request.match, style=request.style, report=report))
+        await ctx.send_message(
+            Analysis(match=request.match, style=request.style, report=report, language=request.language)
+        )
 
 
 class RetrievalExecutor(Executor):
@@ -127,15 +131,16 @@ class NarratorExecutor(Executor):
             report=AnalystReport(
                 findings=analysis.report.findings + retrieval.comparisons_as_findings(comparisons)
             ),
+            language=analysis.language,
             comparisons=comparisons,
         )
-        recap = await narrator.narrate(combined.match, combined.report, combined.style)
+        recap = await narrator.narrate(combined.match, combined.report, combined.style, language=combined.language)
         await ctx.send_message(Draft(analysis=combined, recap=recap, rewrites=0))
 
     @handler
     async def rewrite(self, revision: Revision, ctx: WorkflowContext[Draft]) -> None:
         a = revision.analysis
-        recap = await narrator.narrate(a.match, a.report, a.style, feedback=revision.feedback)
+        recap = await narrator.narrate(a.match, a.report, a.style, feedback=revision.feedback, language=a.language)
         await ctx.send_message(
             Draft(analysis=a, recap=recap, rewrites=revision.rewrites, rejections=revision.rejections)
         )
@@ -200,9 +205,12 @@ class Progress:
     detail: str = ""  # e.g. "rewrite 1"
 
 
-async def stream_recap(match: Match, style: Style) -> AsyncIterator[Progress | VerifiedRecap]:
+async def stream_recap(
+    match: Match, style: Style, language: Language = "en"
+) -> AsyncIterator[Progress | VerifiedRecap]:
     """Run the pipeline, yielding Progress as steps run and the VerifiedRecap at the end."""
-    async for event in build_workflow().run(RecapRequest(match=match, style=style), stream=True):
+    request = RecapRequest(match=match, style=style, language=language)
+    async for event in build_workflow().run(request, stream=True):
         if event.type == "executor_invoked":
             detail = f"rewrite {event.data.rewrites}" if isinstance(event.data, Revision) else ""
             yield Progress(step=event.executor_id, status="started", detail=detail)
@@ -212,10 +220,10 @@ async def stream_recap(match: Match, style: Style) -> AsyncIterator[Progress | V
             yield event.data
 
 
-async def run_recap(match: Match, style: Style, verbose: bool = False) -> VerifiedRecap:
+async def run_recap(match: Match, style: Style, language: Language = "en", verbose: bool = False) -> VerifiedRecap:
     """Run the whole pipeline for one match and return the verified recap."""
     result: VerifiedRecap | None = None
-    async for item in stream_recap(match, style):
+    async for item in stream_recap(match, style, language):
         if isinstance(item, VerifiedRecap):
             result = item
         elif verbose and item.status == "started":
@@ -229,6 +237,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the recap workflow on a synthetic match.")
     parser.add_argument("--seed", type=int, default=1, help="which synthetic match")
     parser.add_argument("--style", choices=list(STYLE_GUIDES), default="broadcaster")
+    parser.add_argument("--language", choices=list(LANGUAGES), default="en")
     parser.add_argument("--diagram", action="store_true", help="print the workflow as a Mermaid diagram and exit")
     parser.add_argument("--save", action="store_true", help="save the match and verified recap to Cosmos DB")
     args = parser.parse_args()
@@ -239,11 +248,11 @@ def main() -> None:
 
     match = generate_match(args.seed)
     score = match.score()
-    print(f"{match.home_team} {score['Home']}-{score['Away']} {match.away_team} ({args.style})")
+    print(f"{match.home_team} {score['Home']}-{score['Away']} {match.away_team} ({args.style}, {args.language})")
     async def run() -> VerifiedRecap:
         if await setup_tracing():
             print("  (tracing to Azure Monitor)")
-        return await run_recap(match, args.style, verbose=True)
+        return await run_recap(match, args.style, args.language, verbose=True)
 
     result = asyncio.run(run())
     recap = result.recap
@@ -260,7 +269,7 @@ def main() -> None:
         print(f"Removed: {removed.text!r}\n    because: {removed.problem}")
 
     if args.save:
-        from inside_the_game.store import Store  # only needed (and configured) when saving
+        from inside_the_game.store import Store, recap_id  # only needed (and configured) when saving
 
         async def save() -> None:
             async with Store() as store:
@@ -268,7 +277,7 @@ def main() -> None:
                 await store.save_recap(match.match_id, result)
 
         asyncio.run(save())
-        print(f"\nSaved to Cosmos DB as {match.match_id}-{args.style}")
+        print(f"\nSaved to Cosmos DB as {recap_id(match.match_id, args.style, args.language)}")
 
 
 if __name__ == "__main__":

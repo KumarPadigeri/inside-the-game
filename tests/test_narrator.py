@@ -39,6 +39,14 @@ def test_resolve_maps_findings_to_sorted_unique_event_ids() -> None:
     assert recap.sentences[1].event_ids == [7, 99]
 
 
+def test_prompt_asks_for_the_language_but_keeps_names_untranslated() -> None:
+    match = generate_match(1)
+    assert "Language:" not in build_prompt(match, REPORT, "fan")
+    spanish = build_prompt(match, REPORT, "fan", language="es")
+    assert "in Spanish" in spanish
+    assert "untranslated" in spanish and "0-9" in spanish
+
+
 def test_prompt_includes_verifier_feedback_only_when_rewriting() -> None:
     match = generate_match(1)
     assert "fact-checker" not in build_prompt(match, REPORT, "fan")

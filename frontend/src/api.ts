@@ -4,6 +4,21 @@ export type Team = 'Home' | 'Away'
 export type Style = 'fan' | 'analyst' | 'broadcaster'
 export const STYLES: Style[] = ['fan', 'analyst', 'broadcaster']
 
+export type Language = 'en' | 'es' | 'fr' | 'pt' | 'hi'
+/** Each language by its own name, as speakers look for it in a picker. */
+export const LANGUAGES: Record<Language, string> = {
+  en: 'English',
+  es: 'Español',
+  fr: 'Français',
+  pt: 'Português',
+  hi: 'हिन्दी',
+}
+
+export interface SavedRecap {
+  style: Style
+  language: Language
+}
+
 export interface MatchEvent {
   event_id: number
   minute: number
@@ -26,7 +41,7 @@ export interface MatchSummary {
   home_team: string
   away_team: string
   score: Score
-  recaps?: Style[] // styles that already have a saved recap
+  recaps?: SavedRecap[] // recaps already saved for this match
 }
 
 export interface Match extends MatchSummary {
@@ -67,7 +82,7 @@ export interface RecapSentence {
 }
 
 export interface VerifiedRecap {
-  recap: { style: Style; headline: RecapSentence; sentences: RecapSentence[] }
+  recap: { style: Style; language: Language; headline: RecapSentence; sentences: RecapSentence[] }
   comparisons: Comparison[]
   rewrites: number
   rejections: { draft: number; text: string; problem: string }[]
@@ -139,7 +154,10 @@ async function getJson<T>(path: string): Promise<T | null> {
 export const listMatches = () => getJson<MatchSummary[]>('/api/matches').then((m) => m ?? [])
 export const getMatch = (id: string) => getJson<Match>(`/api/matches/${id}`)
 export const getStats = (id: string) => getJson<Stats>(`/api/matches/${id}/stats`)
-export const getRecap = (id: string, style: Style) => getJson<VerifiedRecap>(`/api/matches/${id}/recaps/${style}`)
+const recapPath = (id: string, style: Style, language: Language) =>
+  `/api/matches/${id}/recaps/${style}?language=${language}`
+export const getRecap = (id: string, style: Style, language: Language) =>
+  getJson<VerifiedRecap>(recapPath(id, style, language))
 
 /** Thrown when the server refuses to generate (missing or wrong demo passcode). */
 export class PasscodeError extends Error {}
@@ -151,10 +169,11 @@ export class PasscodeError extends Error {}
 export async function generateRecap(
   id: string,
   style: Style,
+  language: Language,
   passcode: string,
   onProgress: (progress: Progress) => void,
 ): Promise<VerifiedRecap> {
-  const response = await fetch(`${BASE}/api/matches/${id}/recaps/${style}`, {
+  const response = await fetch(`${BASE}${recapPath(id, style, language)}`, {
     method: 'POST',
     headers: passcode ? { 'X-Recap-Passcode': passcode } : {},
   })
