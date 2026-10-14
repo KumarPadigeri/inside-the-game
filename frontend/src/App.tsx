@@ -35,6 +35,7 @@ import { applyTheme, loadTheme, type Theme } from './theme'
 import { loadLanguage, saveLanguage } from './language'
 import { focusLabel } from './focus'
 import { useMediaQuery } from './useMediaQuery'
+import { readUrl, writeUrl, type Mode } from './urlState'
 import { EMPTY_PIPELINE, applyProgress, type PipelineState } from './pipelineState'
 
 const PASSCODE_KEY = 'itg-demo-passcode'
@@ -51,7 +52,13 @@ const initials = (team: string) =>
     .join('')
     .slice(0, 2)
 
-type Mode = 'recap' | 'live'
+// The view a shared link asks for (?match=5&mode=live&style=fan&lang=es&focus=Away). A link sets the
+// whole view, so a missing language means English rather than this browser's last choice.
+const LINKED = readUrl()
+const FROM_LINK = window.location.search !== ''
+if (LINKED.mode === 'live' && LINKED.focus && LINKED.focus !== 'Home' && LINKED.focus !== 'Away') {
+  delete LINKED.focus // live commentary personalizes by club only
+}
 
 /** Live playback speeds: seconds per match minute (1× plays a match in about a minute and a half). */
 const SPEEDS: [label: string, secondsPerMinute: number][] = [
@@ -93,9 +100,9 @@ function savePasscode(value: string) {
 export default function App() {
   const [matches, setMatches] = useState<MatchSummary[]>([])
   const [matchId, setMatchId] = useState<string | null>(null)
-  const [style, setStyle] = useState<Style>('broadcaster')
-  const [language, setLanguage] = useState<Language>(loadLanguage)
-  const [focus, setFocus] = useState('') // personalization: '', 'Home' / 'Away' (supported club) or a player id
+  const [style, setStyle] = useState<Style>(LINKED.style ?? 'broadcaster')
+  const [language, setLanguage] = useState<Language>(() => LINKED.language ?? (FROM_LINK ? 'en' : loadLanguage()))
+  const [focus, setFocus] = useState(LINKED.focus ?? '') // personalization: '', 'Home' / 'Away' (supported club) or a player id
   const [match, setMatch] = useState<Match | null>(null)
   const [stats, setStats] = useState<Stats | null>(null)
   const [result, setResult] = useState<VerifiedRecap | null>(null)
@@ -110,7 +117,8 @@ export default function App() {
   const [listLoading, setListLoading] = useState(true) // the match list hasn't arrived yet
   const [slowStart, setSlowStart] = useState(false) // ...and it's taking a while (the backend is waking up)
   const [loading, setLoading] = useState(true) // the selected match / recap is loading
-  const [mode, setMode] = useState<Mode>('recap')
+  const [mode, setMode] = useState<Mode>(LINKED.mode ?? 'recap')
+  const [showAllMatches, setShowAllMatches] = useState(false) // the rail lists only matches with recaps
   const liveA = useLiveStream() // the main view (and the left pane when comparing)
   const liveB = useLiveStream() // the right pane when comparing
   const live = liveA.state
@@ -142,7 +150,11 @@ export default function App() {
         setMatches(list)
         // Open on the most exciting demo match (a 3-2 comeback) when it's there.
         setMatchId(
-          (current) => current ?? list.find((m) => m.match_id === OPENING_MATCH)?.match_id ?? list[0]?.match_id ?? null,
+          (current) =>
+            current ??
+            list.find((m) => m.match_id === (LINKED.matchId ?? OPENING_MATCH))?.match_id ??
+            list[0]?.match_id ??
+            null,
         )
       })
       .catch((e: Error) => setError(e.message))
@@ -271,6 +283,11 @@ export default function App() {
     }
   }
 
+  // Keep the address bar in step with the view, so it can be copied and shared.
+  useEffect(() => {
+    if (matchId) writeUrl({ matchId, mode, style, language, focus })
+  }, [matchId, mode, style, language, focus])
+
   // Remember the split for next time.
   useEffect(() => {
     try {
@@ -365,6 +382,10 @@ export default function App() {
   }
 
   const isLive = mode === 'live'
+  // The rail shows the matches that have recaps (plus the open one); the rest are one click away.
+  const withRecaps = matches.filter((m) => (m.recaps ?? []).length > 0 || m.match_id === matchId)
+  const visibleMatches = showAllMatches || withRecaps.length === 0 ? matches : withRecaps
+  const hiddenMatches = matches.length - visibleMatches.length
   const liveMatch: Match | null = match && { ...match, events: live.events }
   const pitchEvents = isLive
     ? liveSelected && liveMatch
@@ -467,7 +488,7 @@ export default function App() {
           </div>
           {listLoading && <MatchListSkeleton />}
           <ul hidden={listLoading}>
-            {matches.map((m) => (
+            {visibleMatches.map((m) => (
               <li key={m.match_id}>
                 <button
                   type="button"
@@ -501,6 +522,11 @@ export default function App() {
               </li>
             ))}
           </ul>
+          {!listLoading && hiddenMatches > 0 && (
+            <button type="button" className="link-button show-all" onClick={() => setShowAllMatches(true)}>
+              Show all {matches.length} matches
+            </button>
+          )}
         </nav>
 
         <main

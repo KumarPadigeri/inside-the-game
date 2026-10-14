@@ -2216,3 +2216,19 @@ thead th {
 .split-handle:focus-visible {
   outline: none;
 }
+
+/* "Show all 30 matches" under the list: only in the open list, not the collapsed rail */
+.match-list .show-all {
+  margin-top: 8px;
+  align-self: flex-start;
+}
+
+@media (hover: hover) and (pointer: fine) and (min-width: 901px) {
+  .match-list .show-all {
+    display: none;
+  }
+
+  .match-list:is(:hover, :focus-within):not(.picked) .show-all {
+    display: block;
+  }
+}

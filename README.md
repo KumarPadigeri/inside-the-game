@@ -9,6 +9,9 @@ each sentence against that evidence and sends anything unproven back for a rewri
 
 **Live demo:** https://gentle-mushroom-01796580f.4.azurestaticapps.net
 
+Links open a specific view: `?match=5` (a 3-2 comeback), `?match=2&mode=live` (live mode with verified
+commentary), `?match=1&style=analyst&focus=A11` (following one player), `&lang=es` for Spanish.
+
 Built for the Microsoft x Premier League Developer Hackathon with the
 [Microsoft Agent Framework](https://github.com/microsoft/agent-framework), Microsoft Foundry and Azure.
 
