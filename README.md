@@ -17,6 +17,28 @@ Built for the Microsoft x Premier League Developer Hackathon with the
 
 > All teams, players and matches are **synthetic**. No real Premier League data, names or logos are used.
 
+## For judges: try it in 3 minutes
+
+Nothing to install. Open the [live demo](https://gentle-mushroom-01796580f.4.azurestaticapps.net) (desktop
+browser recommended; it also works on a phone).
+
+1. **Click any sentence of the recap.** The evidence opens beside it: the events on the pitch, the stats
+   that prove it, or a similar moment found in another match.
+2. **The persona button** above the recap (it reads e.g. "Broadcaster · English"): switch the persona
+   (fan / analyst / broadcaster), the language, or follow one club or player. Turn on **Compare side by side** to see two versions at once.
+3. **Live tab**, or **▶ Watch this match live** on the pitch: the match replays minute by minute while
+   verified commentary appears on the key moments and the stats update.
+4. **How it works** (top right) shows the four agents and the Azure services behind them.
+5. **Run the agents yourself:** "↻ Run the agents" (next to the persona button) generates a fresh recap
+   (about 30–60 s) and shows each agent step, including the Verifier's rewrites. It asks for the demo passcode given in the submission
+   form (a free Azure trial pays for the model calls, so generation is passcode-protected; everything else is
+   open).
+
+Saved recaps and live replays load instantly and need no passcode.
+
+**Developers:** the stats tools are also an MCP server (see [MCP server](#mcp-server)), and
+`pytest` runs the test suite without any Azure access.
+
 ---
 
 ## How it works
