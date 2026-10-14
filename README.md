@@ -82,6 +82,21 @@ The four agents run as one **Agent Framework workflow** ([workflow.py](inside_th
 - **Show the work.** The UI shows the agents running live, the evidence behind each sentence, and a fact-check
   log of everything the Verifier sent back.
 
+### What the Verifier caught
+
+Counted by code over every saved result (`python -m inside_the_game.quality`, Oct 14, 2026):
+
+| | |
+|---|---|
+| Verified recaps | 43 (5 languages, 3 personas, club and player focus) |
+| Published sentences | 328, of which 223 link to specific match events and the rest to stats |
+| Approved on the first draft | 6 of 43 recaps; the others needed 61 rewrites in total |
+| Claims sent back for a rewrite | 106: 56 wrong or unsupported facts, 17 wording problems, 33 missing comparisons |
+| Removed because they stayed unproven | 12 sentences (never shown) |
+| Live commentary | 7 runs, 128 verified comments, 19 rewrites, 6 sentences removed |
+
+Most first drafts contain at least one claim the evidence doesn't support. That is why the Verifier exists.
+
 ## Azure services
 
 | Service | Used for |
