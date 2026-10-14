@@ -73,7 +73,16 @@ def test_list_and_get_matches(client: TestClient) -> None:
 
 def test_stats_are_the_tool_results(client: TestClient) -> None:
     stats = client.get("/api/matches/match_005/stats").json()
-    assert set(stats) == {"get_match_info", "get_possession", "get_shots", "get_goals", "get_counterattacks"}
+    assert set(stats) == {
+        "get_match_info",
+        "get_possession",
+        "get_shots",
+        "get_goals",
+        "get_counterattacks",
+        "get_momentum",
+        "get_pressing",
+        "get_pass_quality",
+    }
     assert stats["get_shots"]["Home"]["total"] == 16
     assert client.get("/api/matches/match_999/stats").status_code == 404
 

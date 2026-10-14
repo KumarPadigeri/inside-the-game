@@ -27,8 +27,12 @@ the tools to learn about the match. Call every tool before answering.
 
 Rules:
 - Never calculate, estimate or invent numbers. Use only values returned by tools.
-- Report 5-8 findings, most important first: the result, how the goals came,
+- Report 6-9 findings, most important first: the result, how the goals came,
   turning points (lead changes, comebacks), counterattacks, shots, possession.
+- Explain WHY, not only what: use get_momentum for who controlled which period
+  and when the game turned or got frantic, get_pressing for where the ball was
+  won back and what high ball wins led to, and get_pass_quality for how each
+  team passed. Include at least two such "why" findings.
 - Each finding is one short factual sentence. Refer to teams by their names
   and to players by their ids (e.g. H9).
 - Describe pitch positions in words ("in its own half", "high up the pitch"),
@@ -88,7 +92,32 @@ def build_tools(match: Match, player: str | None = None) -> list[FunctionTool]:
         assert player is not None
         return dict(stats.player_stats(match, player))
 
-    functions = [get_match_info, get_possession, get_shots, get_goals, get_counterattacks]
+    def get_momentum() -> list[dict[str, Any]]:
+        """The match in 15-minute windows: possession, field tilt (share of attacking-third passes), shots,
+        goal event_ids, possession changes, and code-computed labels: control (team with field tilt >= 60%,
+        else "even") and tempo ("frantic" / "steady" / "normal" vs this match's average rate of possession changes)."""
+        return [dict(window) for window in stats.momentum(match)]
+
+    def get_pressing() -> dict[str, Any]:
+        """Where each team won the ball (tackles and interceptions): high (attacking third), middle, deep, and how
+        many high ball wins led to a shot or a goal, with their event_ids."""
+        return dict(stats.pressing(match))
+
+    def get_pass_quality() -> dict[str, Any]:
+        """Passing quality per team: average pass distance (m), long passes (30 m+) and their accuracy,
+        progressive passes (15 m+ forward), average difficulty (1-5) and hard-pass (4-5) accuracy."""
+        return dict(stats.pass_quality(match))
+
+    functions = [
+        get_match_info,
+        get_possession,
+        get_shots,
+        get_goals,
+        get_counterattacks,
+        get_momentum,
+        get_pressing,
+        get_pass_quality,
+    ]
     if player:
         functions.append(get_player_stats)
     return [tool(f) for f in functions]
@@ -105,7 +134,17 @@ def make_analyst(match: Match, client: FoundryChatClient | None = None, player: 
     )
 
 
-TOOL_NAMES = ("get_match_info", "get_possession", "get_shots", "get_goals", "get_counterattacks", "get_player_stats")
+TOOL_NAMES = (
+    "get_match_info",
+    "get_possession",
+    "get_shots",
+    "get_goals",
+    "get_counterattacks",
+    "get_momentum",
+    "get_pressing",
+    "get_pass_quality",
+    "get_player_stats",
+)
 
 
 def normalize_tool_names(report: AnalystReport) -> AnalystReport:

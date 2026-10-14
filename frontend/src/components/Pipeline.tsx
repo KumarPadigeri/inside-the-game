@@ -24,7 +24,7 @@ function Step({ id, status, note }: { id: string; status: StepStatus; note?: str
       <span className="step-dot" aria-hidden="true" />
       <div>
         <div className="step-label">{label}</div>
-        <div className="step-role">{note ?? role}</div>
+        <div className={`step-role${note ? ' note' : ''}`}>{note ?? role}</div>
         <span className="visually-hidden">{explanation}</span>
       </div>
     </div>

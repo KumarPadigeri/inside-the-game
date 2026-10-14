@@ -129,6 +129,39 @@ export interface Counterattack {
   event_ids: number[]
 }
 
+export interface MomentumWindow {
+  start_minute: number
+  end_minute: number
+  possession: Record<Team, number>
+  field_tilt: Record<Team, number>
+  shots: Record<Team, number>
+  goals: number[]
+  possession_changes: number
+  control: Team | 'even'
+  tempo: 'frantic' | 'steady' | 'normal'
+}
+
+export interface PressingStats {
+  ball_wins: number
+  high: number
+  middle: number
+  deep: number
+  high_win_shots: number
+  high_win_goals: number
+  high_win_event_ids: number[]
+}
+
+export interface PassQualityStats {
+  passes_measured: number
+  average_distance_m: number
+  long_passes: number
+  long_pass_accuracy: number
+  progressive_passes: number
+  average_difficulty: number
+  hard_passes: number
+  hard_pass_accuracy: number
+}
+
 interface PlayerMove {
   minute: number
   outcome: string
@@ -161,6 +194,9 @@ export interface Stats {
   get_shots: Record<Team, ShotStats>
   get_goals: Goal[]
   get_counterattacks: Counterattack[]
+  get_momentum: MomentumWindow[]
+  get_pressing: Record<Team, PressingStats>
+  get_pass_quality: Record<Team, PassQualityStats>
   get_player_stats?: PlayerStats // only when following a player
 }
 

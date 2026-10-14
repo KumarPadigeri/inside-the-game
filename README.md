@@ -171,6 +171,10 @@ The match and all its events (about 1,200). The UI looks up a sentence's `event_
 ### `GET /api/matches/{match_id}/stats`
 
 The exact results of the Analyst's tools, keyed by tool name. Sentences about totals cite these.
+Besides the basics below, three tools explain *why*: `get_momentum` (15-minute windows with possession, field
+tilt, shots, possession changes and code-computed `control` / `tempo` labels), `get_pressing` (where each team won
+the ball: high / middle / deep, and what high wins led to) and `get_pass_quality` (pass distance in metres, long and
+progressive passes, and a 1-5 difficulty rating with hard-pass accuracy).
 
 ```json
 {"get_match_info": {"home_team": "...", "away_team": "...", "final_score": {"Home": 3, "Away": 2}},

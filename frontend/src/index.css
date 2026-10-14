@@ -721,7 +721,7 @@ thead th {
 
 .stage-pitch-note {
   position: absolute;
-  inset: auto 8px 8px 8px;
+  inset: 8px 8px auto 8px; /* top: the bottom edge has the Replay button and the "Home attacks" caption */
   margin: 0;
   padding: 4px 8px;
   border-radius: 6px;
@@ -1466,4 +1466,56 @@ thead th {
   color: var(--muted);
   border: 1px dashed var(--border);
   border-radius: var(--radius);
+}
+
+/* ---- momentum (evidence) ---- */
+
+.momentum {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.momentum li {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+
+.momentum-minutes {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.momentum-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.momentum-bar .home {
+  background: var(--home);
+}
+
+.momentum-bar .away {
+  background: var(--away);
+}
+
+/* Laptop widths: agent boxes show just their names (and any rewrite note), so the band stays one line tall.
+   The role is still in each box's tooltip. */
+@media (min-width: 901px) and (max-width: 1500px) {
+  .step {
+    min-width: 0;
+  }
+
+  .step-role:not(.note) {
+    display: none;
+  }
 }

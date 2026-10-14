@@ -3,7 +3,18 @@
 import pytest
 
 from inside_the_game.generator import Event, Match, generate_match
-from inside_the_game.stats import counterattacks, goals, player_stats, players, possession, shots
+from inside_the_game.stats import (
+    counterattacks,
+    goals,
+    momentum,
+    pass_difficulty,
+    pass_quality,
+    player_stats,
+    players,
+    possession,
+    pressing,
+    shots,
+)
 
 # (minute, team, player, type, x, y, outcome, possession_id)
 _ROWS = [
@@ -159,3 +170,52 @@ def test_players_lists_home_then_away_by_shirt_number(match: Match) -> None:
     assert listed[:3] == ["H4", "H6", "H7"]
     assert listed.index("H10") < listed.index("A1")
     assert listed[-1] == "A10"
+
+
+def test_momentum_windows_cover_the_match(match: Match) -> None:
+    windows = momentum(match)
+    # Events run to minute 21: windows 0-14 and 15-21 (a 7-minute tail is long enough to be its own window).
+    assert [(w["start_minute"], w["end_minute"]) for w in windows] == [(0, 14), (15, 21)]
+    first, second = windows
+    assert first["goals"] == [4]
+    assert first["shots"] == {"Home": 3, "Away": 1}
+    assert first["possession_changes"] == 5  # possessions 1-6 in the first window
+    # Home's attacking-third passes: none (x 40-65); Away's: none either -> even, 0% each.
+    assert first["field_tilt"] == {"Home": 0.0, "Away": 0.0} and first["control"] == "even"
+    # Second window: Away's possession 7 has one pass at x=75 in the attacking third.
+    assert second["field_tilt"] == {"Home": 0.0, "Away": 100.0} and second["control"] == "Away"
+    assert second["possession"] == {"Home": 0.0, "Away": 100.0}
+
+
+def test_momentum_tempo_compares_with_the_match_average() -> None:
+    windows = momentum(generate_match(2))
+    assert {w["tempo"] for w in windows} <= {"frantic", "steady", "normal"}
+    assert windows[-1]["end_minute"] == generate_match(2).events[-1].minute
+
+
+def test_pressing_counts_where_the_ball_was_won(match: Match) -> None:
+    home = pressing(match)["Home"]
+    # H4 interception at x=40 (middle) started a shot; H6 tackle at x=70 (high) led to a missed shot.
+    assert (home["ball_wins"], home["high"], home["middle"], home["deep"]) == (2, 1, 1, 0)
+    assert home["high_win_shots"] == 1 and home["high_win_goals"] == 0
+    assert home["high_win_event_ids"] == [13]
+    away = pressing(match)["Away"]
+    assert (away["ball_wins"], away["deep"], away["high_win_shots"]) == (1, 1, 0)
+
+
+def test_pass_difficulty_rating() -> None:
+    assert pass_difficulty(5, 0, 40) == 1  # short, sideways, own half
+    assert pass_difficulty(45, 30, 80) == 5  # long, forward, into the attacking third
+    assert pass_difficulty(25, 16, 50) == 3
+
+
+def test_pass_quality_measures_distance_to_the_next_event(match: Match) -> None:
+    home = pass_quality(match)["Home"]
+    # H7 (50,50) -> H8 (60,45): 10.5 m forward, 3.4 m across; H8 (60,45) -> H9 (90,50): 31.5 m, long.
+    # H4 (40,40) -> H7 (65,50); H7 (65,50) -> H10 (85,55).
+    assert home["passes_measured"] == 4
+    assert home["long_passes"] == 1 and home["long_pass_accuracy"] == 100.0
+    assert home["progressive_passes"] == 3
+    assert 1 <= home["average_difficulty"] <= 5
+    away = pass_quality(match)["Away"]
+    assert away["passes_measured"] >= 1

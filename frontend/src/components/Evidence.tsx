@@ -173,6 +173,70 @@ function ToolEvidence({ tool, match, stats, comparisons, sentence, asOfMinute }:
           </ol>
         </section>
       )
+    case 'get_momentum':
+      return (
+        <section>
+          <h4>Momentum by period</h4>
+          <p className="muted">
+            Field tilt: each team’s share of passes in the attacking third. 60% or more counts as control.
+          </p>
+          <ol className="momentum">
+            {stats.get_momentum.map((w) => (
+              <li key={w.start_minute}>
+                <span className="momentum-minutes">
+                  {w.start_minute}–{w.end_minute}'
+                </span>
+                <span className="momentum-bar" aria-hidden="true">
+                  <span className="home" style={{ width: `${w.field_tilt.Home}%` }} />
+                  <span className="away" style={{ width: `${w.field_tilt.Away}%` }} />
+                </span>
+                <span className="momentum-label">
+                  {w.control === 'even' ? 'even' : teamName(match, w.control)} · {w.tempo}
+                  {w.goals.length > 0 && ` · ${w.goals.length} goal${w.goals.length === 1 ? '' : 's'}`}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )
+    case 'get_pressing': {
+      const p = stats.get_pressing
+      return (
+        <section>
+          <h4>Where the ball was won</h4>
+          <SideBySide
+            match={match}
+            rows={[
+              ['Ball wins', p.Home.ball_wins, p.Away.ball_wins],
+              ['High (attacking third)', p.Home.high, p.Away.high],
+              ['Middle', p.Home.middle, p.Away.middle],
+              ['Deep (own third)', p.Home.deep, p.Away.deep],
+              ['High wins → shot', p.Home.high_win_shots, p.Away.high_win_shots],
+              ['High wins → goal', p.Home.high_win_goals, p.Away.high_win_goals],
+            ]}
+          />
+        </section>
+      )
+    }
+    case 'get_pass_quality': {
+      const q = stats.get_pass_quality
+      return (
+        <section>
+          <h4>Pass quality</h4>
+          <SideBySide
+            match={match}
+            rows={[
+              ['Average distance', `${q.Home.average_distance_m} m`, `${q.Away.average_distance_m} m`],
+              ['Long passes (30 m+)', q.Home.long_passes, q.Away.long_passes],
+              ['Long pass accuracy', `${q.Home.long_pass_accuracy}%`, `${q.Away.long_pass_accuracy}%`],
+              ['Progressive (15 m+ forward)', q.Home.progressive_passes, q.Away.progressive_passes],
+              ['Average difficulty (1–5)', q.Home.average_difficulty, q.Away.average_difficulty],
+              ['Hard pass accuracy', `${q.Home.hard_pass_accuracy}%`, `${q.Away.hard_pass_accuracy}%`],
+            ]}
+          />
+        </section>
+      )
+    }
     case 'get_player_stats': {
       const p = stats.get_player_stats
       if (!p) return null

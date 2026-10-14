@@ -56,6 +56,11 @@ These are fine and must NOT be rejected:
 - Mild interpretation that the numbers clearly back ("dominated possession"
   with 65%), but not when they don't ("dominated" with 51%).
 
+get_momentum, get_pressing and get_pass_quality labels (control, tempo, high /
+middle / deep, difficulty) are computed by code: a sentence may use them as
+stated ("Oakhurst Albion controlled the second half" when control is "Away" in
+those windows). Interpretation beyond the labels and numbers is unsupported.
+
 find_similar_moments evidence lists moments from OTHER synthetic matches
 found by similarity search. A comparison sentence is supported when the
 moments it names (match teams, minute, kind, what happened) match that

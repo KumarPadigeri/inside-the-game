@@ -111,3 +111,13 @@ def test_saved_commentary_replays_and_collects_in_match_order() -> None:
     replayed = [data["moment"]["key"] for kind, data in messages if kind == "commentary"]
     assert replayed == [goals[0].key, goals[1].key]
     assert LiveCommentary.model_validate(saved.model_dump()) == saved
+
+
+def test_moments_explain_the_momentum_so_far() -> None:
+    so_far = match_until(MATCH, 16)
+    goal = detect_moments(so_far, set())[2]
+    claims = [f.claim for f in moment_findings(so_far, goal, 16).findings if f.tool == "get_momentum"]
+    assert len(claims) == 1 and claims[0].startswith("Momentum, minutes 0-16:")  # a short tail joins the window before
+    full_time = LiveMoment(key="full-time", kind="full-time", minute=91)
+    periods = [f.claim for f in moment_findings(MATCH, full_time, 91).findings if f.tool == "get_momentum"]
+    assert "minutes 75-91 Oakhurst Albion in control" in periods[0]

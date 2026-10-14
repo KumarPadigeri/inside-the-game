@@ -245,6 +245,33 @@ def moment_findings(match_so_far: Match, moment: LiveMoment, minute: int) -> Ana
             event_ids=[],
         )
     )
+    windows = stats.momentum(m)
+
+    def control(window: stats.MomentumWindow) -> str:
+        who = window["control"]
+        return "even" if who == "even" else f"{_name(m, who)} in control"  # type: ignore[arg-type]
+
+    if moment.kind in ("goal", "counterattack") and windows:
+        now = windows[-1]
+        findings.append(
+            Finding(
+                claim=f"Momentum, minutes {now['start_minute']}-{now['end_minute']}: {control(now)} "
+                f"(field tilt {m.home_team} {now['field_tilt']['Home']}%, {m.away_team} {now['field_tilt']['Away']}%), "
+                f"tempo {now['tempo']}.",
+                tool="get_momentum",
+                event_ids=[],
+            )
+        )
+    if moment.kind in ("half-time", "full-time") and windows:
+        findings.append(
+            Finding(
+                claim="Momentum by period: "
+                + "; ".join(f"minutes {w['start_minute']}-{w['end_minute']} {control(w)}" for w in windows)
+                + ".",
+                tool="get_momentum",
+                event_ids=[],
+            )
+        )
     if moment.kind in ("half-time", "full-time"):
         by_team = {t: sum(c["team"] == t for c in counters.values()) for t in ("Home", "Away")}
         findings.append(
