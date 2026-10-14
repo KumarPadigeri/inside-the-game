@@ -31,10 +31,10 @@ export function RecapView({ result, selected, onSelect }: RecapViewProps) {
 }
 
 /** What the Verifier sent back (and what it had to remove): the rewrite loop made visible. */
-export function FactCheckLog({ result }: { result: VerifiedRecap }) {
+export function FactCheckLog({ result, collapsed = false }: { result: VerifiedRecap; collapsed?: boolean }) {
   const { rewrites, rejections, removed } = result
   return (
-    <details className="factcheck" open={rejections.length > 0}>
+    <details className="factcheck" open={!collapsed && rejections.length > 0}>
       <summary>
         Fact-check log:{' '}
         {rewrites === 0

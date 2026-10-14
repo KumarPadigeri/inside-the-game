@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   LANGUAGES,
   PasscodeError,
@@ -8,7 +8,6 @@ import {
   getRecap,
   getStats,
   listMatches,
-  streamLive,
   type Language,
   type Match,
   type MatchSummary,
@@ -25,7 +24,8 @@ import { PersonaIcon } from './components/PersonaIcon'
 import { Pipeline } from './components/Pipeline'
 import { FactCheckLog, RecapView } from './components/RecapView'
 import { LiveFeed, LiveStats } from './components/Live'
-import { IDLE_LIVE, applyLive, type FeedItem, type LiveState } from './liveState'
+import { ComparePane, type Side } from './components/Compare'
+import { useLiveStream, type FeedItem, type LiveState } from './liveState'
 import { sentenceEvents } from './matchEvents'
 import { PERSONAS } from './personas'
 import { applyTheme, loadTheme, type Theme } from './theme'
@@ -81,10 +81,15 @@ export default function App() {
   const [slowStart, setSlowStart] = useState(false) // ...and it's taking a while (the backend is waking up)
   const [loading, setLoading] = useState(true) // the selected match / recap is loading
   const [mode, setMode] = useState<Mode>('recap')
-  const [live, setLive] = useState<LiveState>(IDLE_LIVE)
+  const liveA = useLiveStream() // the main view (and the left pane when comparing)
+  const liveB = useLiveStream() // the right pane when comparing
+  const live = liveA.state
   const [liveSelected, setLiveSelected] = useState<{ sentence: RecapSentence; item: FeedItem } | null>(null)
   const [speed, setSpeed] = useState(1)
-  const liveStream = useRef<AbortController | null>(null)
+  const [compare, setCompare] = useState(false) // split view: two personas / languages side by side
+  const [other, setOther] = useState<Side>({ style: 'fan', language: 'en' }) // the right pane
+  // The right pane's saved recap, tagged with what it was loaded for (a stale tag means it's loading).
+  const [otherRecap, setOtherRecap] = useState<{ key: string; result: VerifiedRecap | null } | null>(null)
 
   function chooseTheme(next: Theme) {
     applyTheme(next)
@@ -127,20 +132,51 @@ export default function App() {
     }
   }, [matchId, style, language])
 
-  // Stop a live stream when the page goes away.
-  useEffect(() => () => liveStream.current?.abort(), [])
+  // When comparing, load the right pane's saved recap too.
+  const otherKey = `${matchId}/${other.style}/${other.language}`
+  useEffect(() => {
+    if (!compare || !matchId) return
+    let cancelled = false
+    getRecap(matchId, other.style, other.language)
+      .then((r) => !cancelled && setOtherRecap({ key: `${matchId}/${other.style}/${other.language}`, result: r }))
+      .catch((e: Error) => !cancelled && setError(e.message))
+    return () => {
+      cancelled = true
+    }
+  }, [compare, matchId, other.style, other.language])
+
+  const livePlaying = live.status === 'playing' || liveB.state.status === 'playing'
 
   function stopLive() {
-    liveStream.current?.abort()
-    liveStream.current = null
-    setLive((state) => (state.status === 'playing' ? { ...state, status: 'done' } : state))
+    liveA.stop()
+    liveB.stop()
   }
 
   function resetLive() {
-    liveStream.current?.abort()
-    liveStream.current = null
-    setLive(IDLE_LIVE)
+    liveA.reset()
+    liveB.reset()
     setLiveSelected(null)
+  }
+
+  function toggleCompare() {
+    resetLive()
+    setAskPasscode(null)
+    if (!compare && other.style === style && other.language === language) {
+      // Start with a different persona on the right, so the two views differ.
+      setOther({ style: STYLES.find((s) => s !== style) ?? 'fan', language })
+    }
+    setCompare(!compare)
+  }
+
+  function chooseOther(next: Side) {
+    resetLive()
+    setOther(next)
+  }
+
+  /** The left pane's picker changes the main persona and language. */
+  function chooseSide(next: Side) {
+    if (next.style !== style) chooseStyle(next.style)
+    if (next.language !== language) chooseLanguage(next.language)
   }
 
   /** Clear what belongs to the previous match or style before switching. */
@@ -164,28 +200,21 @@ export default function App() {
     resetLive()
     setAskPasscode(null)
     setError(null)
-    const controller = new AbortController()
-    liveStream.current = controller
+    const base = { matchId, generate, passcode: code, secondsPerMinute: speed }
     try {
-      await streamLive(
-        matchId,
-        style,
-        language,
-        { generate, passcode: code, secondsPerMinute: speed, signal: controller.signal },
-        (message) => setLive((state) => applyLive(state, message)),
-      )
+      // Comparing plays both panes on the same clock (replays only: the agents commentate one view at a time).
+      await Promise.all([
+        liveA.start({ ...base, style, language }),
+        ...(compare && !generate ? [liveB.start({ ...base, ...other })] : []),
+      ])
       if (generate) savePasscode(code)
     } catch (e) {
-      if (controller.signal.aborted) return // stopped on purpose
       if (e instanceof PasscodeError) {
         setPasscode('')
         savePasscode('')
         setAskPasscode('live')
       }
       setError((e as Error).message)
-      setLive((state) => ({ ...state, status: 'done' }))
-    } finally {
-      if (liveStream.current === controller) liveStream.current = null
     }
   }
 
@@ -263,7 +292,41 @@ export default function App() {
       : []
   const note = isLive
     ? livePitchNote(live, liveSelected !== null)
-    : pitchNote(running, result !== null, selected, match)
+    : pitchNote(running, result !== null || compare, selected, match)
+
+  /** A split-view pane's recap: loading (undefined), not generated yet (null), or the verified recap. */
+  const recapPane = (r: VerifiedRecap | null | undefined) =>
+    r === undefined ? (
+      <p className="muted">Loading…</p>
+    ) : r === null ? (
+      <p className="empty">No recap in this persona and language yet. Generate one in the single view.</p>
+    ) : (
+      <>
+        <RecapView result={r} selected={selected} onSelect={setSelected} />
+        <FactCheckLog result={r} collapsed />
+      </>
+    )
+
+  /** A split-view pane's live feed. Both panes follow the same match clock. */
+  const livePane = (state: LiveState) => (
+    <>
+      {state.status === 'idle' && <p className="muted">Press Watch live: both views play on the same clock.</p>}
+      {state.status !== 'idle' && state.commentary === 'none' && (
+        <p className="muted">Live stats only: no commentary is saved for this persona and language yet.</p>
+      )}
+      {match && (
+        <LiveFeed
+          feed={state.feed}
+          mode={state.commentary}
+          playing={state.status === 'playing'}
+          events={live.events}
+          teams={{ home: match.home_team, away: match.away_team }}
+          selected={liveSelected?.sentence ?? null}
+          onSelect={(sentence, item) => setLiveSelected({ sentence, item })}
+        />
+      )}
+    </>
+  )
 
   return (
     <div className="app">
@@ -284,7 +347,7 @@ export default function App() {
               disabled={running}
             >
               {m === 'recap' ? 'Recap' : 'Live'}
-              {m === 'live' && live.status === 'playing' && <span className="live-dot" aria-hidden="true" />}
+              {m === 'live' && livePlaying && <span className="live-dot" aria-hidden="true" />}
             </button>
           ))}
         </div>
@@ -351,39 +414,54 @@ export default function App() {
               )}
 
               <section className="controls">
-                <div className="styles" role="radiogroup" aria-label="Recap style">
-                  {STYLES.map((s) => (
-                    <button
-                      type="button"
-                      key={s}
-                      role="radio"
-                      aria-checked={s === style}
-                      className={s === style ? 'active' : undefined}
-                      onClick={() => chooseStyle(s)}
-                      disabled={running}
-                      data-tooltip={PERSONAS[s]}
-                      aria-description={PERSONAS[s]}
-                    >
-                      <PersonaIcon style={s} />
-                      {s}
-                    </button>
-                  ))}
-                </div>
-                <label className="language">
-                  <GlobeIcon />
-                  <select
-                    aria-label="Recap language"
-                    value={language}
-                    onChange={(e) => chooseLanguage(e.target.value as Language)}
-                    disabled={running}
-                  >
-                    {Object.entries(LANGUAGES).map(([code, name]) => (
-                      <option key={code} value={code}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <button
+                  type="button"
+                  className={`compare-toggle${compare ? ' active' : ''}`}
+                  aria-pressed={compare}
+                  onClick={toggleCompare}
+                  disabled={running || livePlaying}
+                  data-tooltip="Two personas or languages side by side"
+                >
+                  <CompareIcon />
+                  Compare
+                </button>
+                {!compare && (
+                  <>
+                    <div className="styles" role="radiogroup" aria-label="Recap style">
+                      {STYLES.map((s) => (
+                        <button
+                          type="button"
+                          key={s}
+                          role="radio"
+                          aria-checked={s === style}
+                          className={s === style ? 'active' : undefined}
+                          onClick={() => chooseStyle(s)}
+                          disabled={running}
+                          data-tooltip={PERSONAS[s]}
+                          aria-description={PERSONAS[s]}
+                        >
+                          <PersonaIcon style={s} />
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                    <label className="language">
+                      <GlobeIcon />
+                      <select
+                        aria-label="Recap language"
+                        value={language}
+                        onChange={(e) => chooseLanguage(e.target.value as Language)}
+                        disabled={running}
+                      >
+                        {Object.entries(LANGUAGES).map(([code, name]) => (
+                          <option key={code} value={code}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                )}
                 {askPasscode ? (
                   <form
                     className="passcode"
@@ -407,7 +485,7 @@ export default function App() {
                   </form>
                 ) : isLive ? (
                   <div className="live-actions">
-                    {live.status === 'playing' ? (
+                    {livePlaying ? (
                       <button type="button" className="primary" onClick={stopLive}>
                         ■ Stop
                       </button>
@@ -438,14 +516,16 @@ export default function App() {
                     )}
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => (passcode ? void generate() : setAskPasscode('recap'))}
-                    disabled={running || loading || !matchId}
-                  >
-                    {running ? 'Agents at work…' : result ? 'Regenerate recap' : 'Generate recap'}
-                  </button>
+                  !compare && (
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => (passcode ? void generate() : setAskPasscode('recap'))}
+                      disabled={running || loading || !matchId}
+                    >
+                      {running ? 'Agents at work…' : result ? 'Regenerate recap' : 'Generate recap'}
+                    </button>
+                  )
                 )}
               </section>
 
@@ -453,7 +533,13 @@ export default function App() {
               {isLive && !loading && match && (
                 <LiveStats tick={live.tick} teams={{ home: match.home_team, away: match.away_team }} />
               )}
-              {!isLive && (running || result) && (
+              {!isLive && compare && !loading && (
+                <p className="compare-hint">
+                  Same match, same verified facts, two different experiences. Pick a persona and language for each side;
+                  click any sentence to see where it happened.
+                </p>
+              )}
+              {!isLive && !compare && (running || result) && (
                 <Pipeline state={result && !running ? doneState(result.rewrites) : pipeline} />
               )}
             </div>
@@ -473,7 +559,18 @@ export default function App() {
           </section>
           {error && <p className="error">{error}</p>}
 
-          {isLive && !loading && match && liveMatch ? (
+          {compare && !loading && match && liveMatch ? (
+            <div className="compare-grid">
+              <ComparePane label="A" side={{ style, language }} onChange={chooseSide} disabled={running || livePlaying}>
+                {isLive ? livePane(live) : recapPane(result)}
+              </ComparePane>
+              <ComparePane label="B" side={other} onChange={chooseOther} disabled={running || livePlaying}>
+                {isLive
+                  ? livePane(liveB.state)
+                  : recapPane(otherRecap?.key === otherKey ? otherRecap.result : undefined)}
+              </ComparePane>
+            </div>
+          ) : isLive && !loading && match && liveMatch ? (
             <div className="recap-grid">
               <div className="recap-column">
                 <LiveNotice
@@ -558,6 +655,23 @@ function RecapMarks({ styles, language }: { styles: Style[]; language: Language 
         </span>
       ))}
     </span>
+  )
+}
+
+function CompareIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M12 4v16" />
+    </svg>
   )
 }
 
