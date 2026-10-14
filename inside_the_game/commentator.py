@@ -33,7 +33,6 @@ from inside_the_game.foundry import make_client
 from inside_the_game.generator import Match
 from inside_the_game.live import Commentary, Commentator, LiveMoment, moment_findings, tool_results
 from inside_the_game.narrator import (
-    STYLE_GUIDES,
     Language,
     NarratedSentence,
     NarratorOutput,
@@ -42,6 +41,7 @@ from inside_the_game.narrator import (
     Style,
     language_rule,
     resolve_recap,
+    style_guide,
 )
 from inside_the_game.verifier import RemovedSentence, SentenceVerdict
 
@@ -76,11 +76,12 @@ def build_prompt(
     style: Style,
     language: Language,
     feedback: str | None = None,
+    focus: str = "",
 ) -> str:
     """The message sent to the Commentator: style, language, the moment and numbered findings."""
     findings = [{"id": i, "claim": f.claim} for i, f in enumerate(report.findings, start=1)]
     prompt = (
-        f"Style: {STYLE_GUIDES[style]}\n"
+        f"Style: {style_guide(style, match, focus)}\n"
         f"{language_rule(language)}"
         f"Home team: {match.home_team}. Away team: {match.away_team}.\n"
         f"Moment: {moment.kind} in minute {moment.minute}.\n"
@@ -125,9 +126,12 @@ async def comment(
     style: Style,
     language: Language,
     feedback: str | None = None,
+    focus: str = "",
 ) -> Recap:
     """Run the Commentator and return its sentences with evidence attached."""
-    response = await make_commentator_agent().run(build_prompt(match, moment, report, style, language, feedback))
+    response = await make_commentator_agent().run(
+        build_prompt(match, moment, report, style, language, feedback, focus)
+    )
     output = response.value
     if output is None:
         raise ValueError(f"Commentator returned no structured commentary: {response.text!r}")
@@ -147,6 +151,7 @@ class MomentRequest:
     report: AnalystReport
     style: Style
     language: Language
+    focus: str = ""  # "" or the supported club
 
 
 @dataclass
@@ -182,13 +187,15 @@ class CommentatorExecutor(Executor):
     @handler
     async def first_draft(self, request: MomentRequest, ctx: WorkflowContext[LiveDraft]) -> None:
         r = request
-        recap = await comment(r.match, r.moment, r.report, r.style, r.language)
+        recap = await comment(r.match, r.moment, r.report, r.style, r.language, focus=r.focus)
         await ctx.send_message(LiveDraft(request=r, recap=recap, rewrites=0))
 
     @handler
     async def rewrite(self, revision: LiveRevision, ctx: WorkflowContext[LiveDraft]) -> None:
         r = revision.request
-        recap = await comment(r.match, r.moment, r.report, r.style, r.language, feedback=revision.feedback)
+        recap = await comment(
+            r.match, r.moment, r.report, r.style, r.language, feedback=revision.feedback, focus=r.focus
+        )
         await ctx.send_message(LiveDraft(request=r, recap=recap, rewrites=revision.rewrites))
 
 
@@ -234,14 +241,20 @@ async def run_moment(request: MomentRequest) -> Commentary:
     return outputs[-1]
 
 
-def make_commentator(style: Style, language: Language = "en") -> Commentator:
+def make_commentator(style: Style, language: Language = "en", focus: str = "") -> Commentator:
     """A live commentator: findings by code, words by the Commentator, checks by the Verifier."""
 
     async def commentate(match_so_far: Match, moment: LiveMoment) -> Commentary | None:
         minute = match_so_far.events[-1].minute if match_so_far.events else moment.minute
         report = moment_findings(match_so_far, moment, minute)
         request = MomentRequest(
-            match=match_so_far, moment=moment, minute=minute, report=report, style=style, language=language
+            match=match_so_far,
+            moment=moment,
+            minute=minute,
+            report=report,
+            style=style,
+            language=language,
+            focus=focus,
         )
         return await run_moment(request)
 

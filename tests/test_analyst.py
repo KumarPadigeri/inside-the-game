@@ -7,6 +7,7 @@ from inside_the_game.analyst import (
     TOOL_NAMES,
     AnalystReport,
     Finding,
+    analyst_prompt,
     build_tools,
     normalize_tool_names,
     unknown_event_ids,
@@ -16,8 +17,17 @@ from inside_the_game.generator import generate_match
 
 def test_tools_have_names_and_descriptions() -> None:
     tools = build_tools(generate_match(1))
-    assert tuple(t.name for t in tools) == TOOL_NAMES
+    assert tuple(t.name for t in tools) == TOOL_NAMES[:-1]  # get_player_stats only in player focus mode
     assert all(t.description for t in tools)
+
+
+def test_player_focus_adds_the_player_tool_and_asks_about_the_player() -> None:
+    match = generate_match(5)
+    by_name = {t.name: t for t in build_tools(match, player="H9")}
+    assert tuple(by_name) == TOOL_NAMES
+    assert by_name["get_player_stats"].func() == stats.player_stats(match, "H9")
+    assert analyst_prompt() == "Analyse this match."
+    assert "H9" in analyst_prompt("H9") and "get_player_stats" in analyst_prompt("H9")
 
 
 def test_tools_return_the_stats_for_their_match() -> None:

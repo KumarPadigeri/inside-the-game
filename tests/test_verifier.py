@@ -157,3 +157,15 @@ def test_style_checks_catch_english_left_in_another_language() -> None:
     assert set(problems) == {1}
     assert '"16th"' in problems[1]
     assert style_problems(recap.model_copy(update={"sentences": [_sentence("H9 scored in the 16th minute.")]})) == {}
+
+
+def test_supporter_recaps_tell_the_verifier_who_we_are() -> None:
+    match = generate_match(1)
+    recap = _recap_of("We lost.", "Our shots were blocked.").model_copy(update={"focus": "Home"})
+    assert '"we", "us" and "our" mean Eastmoor United' in build_prompt(match, recap)
+    assert "supporters" not in build_prompt(match, _recap_of("Ashvale Town won."))
+
+
+def test_style_checks_catch_internal_event_numbers() -> None:
+    problems = style_problems(_recap_of("We lost.", "Build-ups that ended with event 419 and event 432.", "Ten events later."))
+    assert set(problems) == {1} and "event number" in problems[1]

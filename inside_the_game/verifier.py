@@ -24,7 +24,7 @@ from inside_the_game.analyst import build_tools
 from inside_the_game.foundry import make_client
 from inside_the_game.generator import Match
 from inside_the_game.moments import SIMILAR_MOMENTS_TOOL, Comparison
-from inside_the_game.narrator import Recap, RecapSentence
+from inside_the_game.narrator import Recap, RecapSentence, focus_player
 
 MAX_REWRITES = 2
 
@@ -133,10 +133,13 @@ def build_prompt(
 
     `context` is an extra note for the Verifier (e.g. that live stats cover only the match so far).
     """
-    tool_results: dict[str, Any] = {t.name: t.func() for t in build_tools(match)}
+    tool_results: dict[str, Any] = {t.name: t.func() for t in build_tools(match, focus_player(recap.focus))}
     tool_results[SIMILAR_MOMENTS_TOOL] = comparison_evidence(comparisons or [])
     events = {e.event_id: asdict(e) for e in match.events}
     blocks = [f"Home team: {match.home_team}. Away team: {match.away_team}.", *filter(None, [context])]
+    if recap.focus in ("Home", "Away"):
+        club = match.home_team if recap.focus == "Home" else match.away_team
+        blocks.append(f'Written for {club} supporters: "we", "us" and "our" mean {club}.')
     for number, sentence in enumerate(numbered_sentences(recap)):
         evidence = {
             "tool_results": {name: tool_results[name] for name in sentence.tools if name in tool_results},
@@ -173,6 +176,7 @@ _LEAKS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b[xy]\s*=\s*\d"), "mentions a pitch coordinate; describe the position in words"),
     (re.compile(r"\b(event_?ids?|possession_id|match_id|moment_id)\b", re.I), "mentions an internal field name"),
     (re.compile(r"\bmatch_\d+"), "mentions an internal match id"),
+    (re.compile(r"\bevents? (?:number |no\.? |#)?\d+", re.I), "mentions an internal event number"),
     (re.compile(r"\bH\b(?!\d)|\bA\b(?=\s+(?:won|lost|scored|made|had)\b)"), "uses a bare team letter instead of a player id"),
 ]
 
@@ -261,7 +265,9 @@ def finalize(
         else:
             removed.append(RemovedSentence(text=sentence.text, problem=verdict.problem))
     return VerifiedRecap(
-        recap=Recap(style=recap.style, language=recap.language, headline=headline, sentences=kept),
+        recap=Recap(
+            style=recap.style, language=recap.language, focus=recap.focus, headline=headline, sentences=kept
+        ),
         comparisons=comparisons or [],
         rewrites=rewrites,
         rejections=rejections or [],

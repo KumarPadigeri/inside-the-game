@@ -14,6 +14,9 @@ export const LANGUAGES: Record<Language, string> = {
   hi: 'हिन्दी',
 }
 
+/** Personalization: '' (neutral), a supported club ('Home' / 'Away') or a followed player ('H9'). */
+export type Focus = string
+
 export interface SavedRecap {
   style: Style
   language: Language
@@ -82,7 +85,7 @@ export interface RecapSentence {
 }
 
 export interface VerifiedRecap {
-  recap: { style: Style; language: Language; headline: RecapSentence; sentences: RecapSentence[] }
+  recap: { style: Style; language: Language; focus?: Focus; headline: RecapSentence; sentences: RecapSentence[] }
   comparisons: Comparison[]
   rewrites: number
   rejections: { draft: number; text: string; problem: string }[]
@@ -126,6 +129,31 @@ export interface Counterattack {
   event_ids: number[]
 }
 
+interface PlayerMove {
+  minute: number
+  outcome: string
+  event_ids: number[]
+}
+
+/** One player's match (player focus mode). */
+export interface PlayerStats {
+  player: string
+  team: Team
+  first_minute: number
+  last_minute: number
+  passes_attempted: number
+  passes_completed: number
+  pass_accuracy: number
+  shots: number
+  shots_on_target: number
+  goals: { event_id: number; minute: number; score_after: string }[]
+  tackles_won: number
+  interceptions_won: number
+  set_up_goals: PlayerMove[]
+  counterattacks: PlayerMove[]
+  event_ids: number[]
+}
+
 /** The same tool results the agents saw, keyed by tool name. */
 export interface Stats {
   get_match_info: { home_team: string; away_team: string; final_score: Score }
@@ -133,6 +161,7 @@ export interface Stats {
   get_shots: Record<Team, ShotStats>
   get_goals: Goal[]
   get_counterattacks: Counterattack[]
+  get_player_stats?: PlayerStats // only when following a player
 }
 
 export interface Progress {
@@ -153,11 +182,12 @@ async function getJson<T>(path: string): Promise<T | null> {
 
 export const listMatches = () => getJson<MatchSummary[]>('/api/matches').then((m) => m ?? [])
 export const getMatch = (id: string) => getJson<Match>(`/api/matches/${id}`)
-export const getStats = (id: string) => getJson<Stats>(`/api/matches/${id}/stats`)
-const recapPath = (id: string, style: Style, language: Language) =>
-  `/api/matches/${id}/recaps/${style}?language=${language}`
-export const getRecap = (id: string, style: Style, language: Language) =>
-  getJson<VerifiedRecap>(recapPath(id, style, language))
+export const getStats = (id: string, player = '') =>
+  getJson<Stats>(`/api/matches/${id}/stats${player ? `?player=${player}` : ''}`)
+const recapPath = (id: string, style: Style, language: Language, focus: Focus) =>
+  `/api/matches/${id}/recaps/${style}?language=${language}&focus=${encodeURIComponent(focus)}`
+export const getRecap = (id: string, style: Style, language: Language, focus: Focus = '') =>
+  getJson<VerifiedRecap>(recapPath(id, style, language, focus))
 
 /** Thrown when the server refuses to generate (missing or wrong demo passcode). */
 export class PasscodeError extends Error {}
@@ -202,10 +232,11 @@ export async function generateRecap(
   id: string,
   style: Style,
   language: Language,
+  focus: Focus,
   passcode: string,
   onProgress: (progress: Progress) => void,
 ): Promise<VerifiedRecap> {
-  const response = await fetch(`${BASE}${recapPath(id, style, language)}`, {
+  const response = await fetch(`${BASE}${recapPath(id, style, language, focus)}`, {
     method: 'POST',
     headers: passcode ? { 'X-Recap-Passcode': passcode } : {},
   })
@@ -272,10 +303,10 @@ export async function streamLive(
   id: string,
   style: Style,
   language: Language,
-  options: { generate: boolean; passcode: string; secondsPerMinute: number; signal: AbortSignal },
+  options: { generate: boolean; passcode: string; secondsPerMinute: number; focus: Focus; signal: AbortSignal },
   onMessage: (message: LiveMessage) => void,
 ): Promise<void> {
-  const query = `?language=${language}&seconds_per_minute=${options.secondsPerMinute}`
+  const query = `?language=${language}&focus=${options.focus}&seconds_per_minute=${options.secondsPerMinute}`
   const response = await fetch(`${BASE}/api/matches/${id}/live/${style}${query}`, {
     method: options.generate ? 'POST' : 'GET',
     headers: options.generate && options.passcode ? { 'X-Recap-Passcode': options.passcode } : {},

@@ -173,6 +173,37 @@ function ToolEvidence({ tool, match, stats, comparisons, sentence, asOfMinute }:
           </ol>
         </section>
       )
+    case 'get_player_stats': {
+      const p = stats.get_player_stats
+      if (!p) return null
+      return (
+        <section>
+          <h4>
+            {p.player} ({teamName(match, p.team)}), minutes {p.first_minute}–{p.last_minute}
+          </h4>
+          <table className="stat-table">
+            <tbody>
+              {(
+                [
+                  ['Goals', p.goals.map((g) => `${g.minute}' (${g.score_after})`).join(', ') || '0'],
+                  ['Shots (on target)', `${p.shots} (${p.shots_on_target})`],
+                  ['Passes completed', `${p.passes_completed} of ${p.passes_attempted} (${p.pass_accuracy}%)`],
+                  ['Tackles won', p.tackles_won],
+                  ['Interceptions won', p.interceptions_won],
+                  ['Teammates’ goals set up', p.set_up_goals.map((g) => `${g.minute}'`).join(', ') || '0'],
+                  ['Counterattacks', p.counterattacks.map((c) => `${c.minute}' (${c.outcome})`).join(', ') || '0'],
+                ] as [string, string | number][]
+              ).map(([label, value]) => (
+                <tr key={label}>
+                  <th scope="row">{label}</th>
+                  <td>{value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )
+    }
     default:
       return null
   }

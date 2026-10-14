@@ -49,7 +49,13 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, rounds: list[list[bool]]) ->
     calls: list[str] = []
 
     async def fake_comment(
-        match: Match, moment, report: AnalystReport, style: Style, language: Language, feedback: str | None = None
+        match: Match,
+        moment,
+        report: AnalystReport,
+        style: Style,
+        language: Language,
+        feedback: str | None = None,
+        focus: str = "",
     ) -> Recap:
         calls.append("rewrite" if feedback else "comment")
         output = CommentatorOutput(
@@ -82,3 +88,8 @@ def test_rejected_sentence_is_rewritten_once_then_dropped(monkeypatch: pytest.Mo
     assert [s.text for s in result.sentences] == ["Line 0."]
     assert result.rewrites == MAX_LIVE_REWRITES
     assert [r.problem for r in result.removed] == ["wrong"]
+
+
+def test_club_focus_changes_the_commentator_voice() -> None:
+    prompt = build_prompt(SO_FAR, GOAL, REPORT, "fan", "en", focus="Away")
+    assert "supporter of Oakhurst Albion" in prompt

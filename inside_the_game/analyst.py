@@ -52,8 +52,11 @@ class AnalystReport(BaseModel):
     findings: list[Finding]
 
 
-def build_tools(match: Match) -> list[FunctionTool]:
-    """Wrap the stats functions as agent tools bound to one match."""
+def build_tools(match: Match, player: str | None = None) -> list[FunctionTool]:
+    """Wrap the stats functions as agent tools bound to one match.
+
+    With `player` (player focus mode), add get_player_stats for that player.
+    """
 
     def get_match_info() -> dict[str, Any]:
         """Team names (Home and Away) and the final score."""
@@ -79,21 +82,30 @@ def build_tools(match: Match) -> list[FunctionTool]:
         """Counterattacks: ball won in own half, then a shot within a few passes. Includes event_ids."""
         return [dict(counter) for counter in stats.counterattacks(match)]
 
-    return [tool(f) for f in (get_match_info, get_possession, get_shots, get_goals, get_counterattacks)]
+    def get_player_stats() -> dict[str, Any]:
+        """The followed player's match: passing, shots, goals, tackles and interceptions won, the
+        teammates' goals and the counterattacks they took part in, and the event_ids of their key moments."""
+        assert player is not None
+        return dict(stats.player_stats(match, player))
+
+    functions = [get_match_info, get_possession, get_shots, get_goals, get_counterattacks]
+    if player:
+        functions.append(get_player_stats)
+    return [tool(f) for f in functions]
 
 
-def make_analyst(match: Match, client: FoundryChatClient | None = None) -> Agent:
-    """Create the Analyst agent for one match."""
+def make_analyst(match: Match, client: FoundryChatClient | None = None, player: str | None = None) -> Agent:
+    """Create the Analyst agent for one match (and, in player focus mode, one player)."""
     return Agent(
         client=client or make_client(),
         name="Analyst",
         instructions=INSTRUCTIONS,
-        tools=build_tools(match),
+        tools=build_tools(match, player),
         default_options={"response_format": AnalystReport},
     )
 
 
-TOOL_NAMES = ("get_match_info", "get_possession", "get_shots", "get_goals", "get_counterattacks")
+TOOL_NAMES = ("get_match_info", "get_possession", "get_shots", "get_goals", "get_counterattacks", "get_player_stats")
 
 
 def normalize_tool_names(report: AnalystReport) -> AnalystReport:
@@ -116,9 +128,20 @@ def unknown_event_ids(report: AnalystReport, match: Match) -> set[int]:
     return {i for finding in report.findings for i in finding.event_ids} - known
 
 
-async def analyse(match: Match) -> AnalystReport:
+def analyst_prompt(player: str | None = None) -> str:
+    """The request to the Analyst; in player focus mode it also asks about that player."""
+    if not player:
+        return "Analyse this match."
+    return (
+        f"Analyse this match for a reader who follows player {player}. Call get_player_stats too, and make "
+        f"3-4 of your findings about {player} (goals, shots, passing, ball winning, the goals and "
+        f"counterattacks {player} took part in), citing get_player_stats. Keep 3-4 findings about the match."
+    )
+
+
+async def analyse(match: Match, player: str | None = None) -> AnalystReport:
     """Run the Analyst on a match and return its validated report."""
-    response = await make_analyst(match).run("Analyse this match.")
+    response = await make_analyst(match, player=player).run(analyst_prompt(player))
     report = response.value
     if report is None:
         raise ValueError(f"Analyst returned no structured report: {response.text!r}")

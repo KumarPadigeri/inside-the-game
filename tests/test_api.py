@@ -32,17 +32,21 @@ class FakeStore:
     async def get_match(self, match_id: str) -> Match | None:
         return MATCH if match_id == MATCH.match_id else None
 
-    async def get_recap(self, match_id: str, style: Style, language: Language = "en") -> VerifiedRecap | None:
-        return self.recaps.get((match_id, style, language))
+    async def get_recap(
+        self, match_id: str, style: Style, language: Language = "en", focus: str = ""
+    ) -> VerifiedRecap | None:
+        return self.recaps.get((match_id, style, language + focus))
 
     async def save_recap(self, match_id: str, result: VerifiedRecap) -> None:
-        self.recaps[(match_id, result.recap.style, result.recap.language)] = result
+        self.recaps[(match_id, result.recap.style, result.recap.language + result.recap.focus)] = result
 
-    async def get_commentary(self, match_id: str, style: Style, language: Language = "en") -> LiveCommentary | None:
-        return self.commentary.get((match_id, style, language))
+    async def get_commentary(
+        self, match_id: str, style: Style, language: Language = "en", focus: str = ""
+    ) -> LiveCommentary | None:
+        return self.commentary.get((match_id, style, language + focus))
 
     async def save_commentary(self, match_id: str, commentary: LiveCommentary) -> None:
-        self.commentary[(match_id, commentary.style, commentary.language)] = commentary
+        self.commentary[(match_id, commentary.style, commentary.language + commentary.focus)] = commentary
 
 
 @pytest.fixture
@@ -87,7 +91,7 @@ def test_missing_recap_is_404_and_bad_style_is_422(client: TestClient) -> None:
 def test_create_recap_streams_progress_then_saves(
     client: TestClient, store: FakeStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def fake_stream(match: Match, style: Style, language: Language) -> AsyncIterator[Progress | VerifiedRecap]:
+    async def fake_stream(match: Match, style: Style, language: Language, focus: str = "") -> AsyncIterator[Progress | VerifiedRecap]:
         yield Progress(step="analyst", status="started")
         yield Progress(step="analyst", status="finished")
         yield RECAP
@@ -107,7 +111,7 @@ def test_language_reaches_the_workflow_and_picks_the_saved_recap(
     spanish = RECAP.model_copy(update={"recap": RECAP.recap.model_copy(update={"language": "es"})})
     asked: list[str] = []
 
-    async def fake_stream(match: Match, style: Style, language: Language) -> AsyncIterator[Progress | VerifiedRecap]:
+    async def fake_stream(match: Match, style: Style, language: Language, focus: str = "") -> AsyncIterator[Progress | VerifiedRecap]:
         asked.append(language)
         yield spanish
 
@@ -120,7 +124,7 @@ def test_language_reaches_the_workflow_and_picks_the_saved_recap(
 
 
 def test_create_recap_reports_errors_in_the_stream(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def failing_stream(match: Match, style: Style, language: Language) -> AsyncIterator[Progress | VerifiedRecap]:
+    async def failing_stream(match: Match, style: Style, language: Language, focus: str = "") -> AsyncIterator[Progress | VerifiedRecap]:
         yield Progress(step="analyst", status="started")
         raise RuntimeError("model unavailable")
 
@@ -133,7 +137,7 @@ def test_create_recap_reports_errors_in_the_stream(client: TestClient, monkeypat
 def test_generating_needs_the_passcode_when_one_is_set(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def fake_stream(match: Match, style: Style, language: Language) -> AsyncIterator[Progress | VerifiedRecap]:
+    async def fake_stream(match: Match, style: Style, language: Language, focus: str = "") -> AsyncIterator[Progress | VerifiedRecap]:
         yield RECAP
 
     monkeypatch.setattr(workflow, "stream_recap", fake_stream)
@@ -189,7 +193,7 @@ def test_saved_commentary_is_replayed_live(client: TestClient, store: FakeStore)
 def test_live_commentary_needs_the_passcode_and_is_saved(
     client: TestClient, store: FakeStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def fake_make_commentator(style: Style, language: Language):  # type: ignore[no-untyped-def]
+    def fake_make_commentator(style: Style, language: Language, focus: str = ""):  # type: ignore[no-untyped-def]
         async def commentate(match_so_far: Match, moment: LiveMoment) -> Commentary | None:
             return _goal_line(moment) if moment.kind == "goal" else None
 
@@ -203,3 +207,34 @@ def test_live_commentary_needs_the_passcode_and_is_saved(
     assert _sse(body).count("commentary") == MATCH.score()["Home"] + MATCH.score()["Away"]
     saved = store.commentary[("match_005", "fan", "es")]
     assert [line.moment.kind for line in saved.lines] == ["goal"] * 5
+
+
+def test_personalized_recaps_are_validated_and_kept_apart(
+    client: TestClient, store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[str] = []
+
+    async def fake_stream(match: Match, style: Style, language: Language, focus: str = "") -> AsyncIterator[Progress | VerifiedRecap]:
+        asked.append(focus)
+        yield RECAP.model_copy(update={"recap": RECAP.recap.model_copy(update={"focus": focus})})
+
+    monkeypatch.setattr(workflow, "stream_recap", fake_stream)
+    url = "/api/matches/match_005/recaps/fan"
+    assert client.post(f"{url}?focus=Away").status_code == 200
+    assert client.post(f"{url}?focus=H9").status_code == 200
+    assert asked == ["Away", "H9"]
+    assert client.get(f"{url}?focus=Away").json()["recap"]["focus"] == "Away"
+    assert client.get(url).status_code == 404  # the neutral recap is a different one
+    assert client.post(f"{url}?focus=H99").status_code == 422  # did not play
+    assert client.get(f"{url}?focus=everyone").status_code == 422
+    live_url = "/api/matches/match_005/live/fan?seconds_per_minute=0"
+    assert client.get(f"{live_url}&focus=H9").status_code == 422  # live personalizes by club only
+    assert '"focus": "Home"' in client.get(f"{live_url}&focus=Home").text
+
+
+def test_stats_include_the_followed_player() -> None:
+    with TestClient(create_app(FakeStore())) as client:
+        stats = client.get("/api/matches/match_005/stats?player=H9").json()
+        assert stats["get_player_stats"]["player"] == "H9"
+        assert "get_player_stats" not in client.get("/api/matches/match_005/stats").json()
+        assert client.get("/api/matches/match_005/stats?player=H99").status_code == 422

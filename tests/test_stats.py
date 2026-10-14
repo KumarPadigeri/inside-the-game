@@ -3,7 +3,7 @@
 import pytest
 
 from inside_the_game.generator import Event, Match, generate_match
-from inside_the_game.stats import counterattacks, goals, possession, shots
+from inside_the_game.stats import counterattacks, goals, player_stats, players, possession, shots
 
 # (minute, team, player, type, x, y, outcome, possession_id)
 _ROWS = [
@@ -121,3 +121,41 @@ def test_every_evidence_id_exists_in_the_match() -> None:
         assert set(goal["buildup_event_ids"]) <= known
     for counter in counterattacks(match):
         assert set(counter["event_ids"]) <= known
+
+
+def test_player_stats_for_a_scorer(match: Match) -> None:
+    h9 = player_stats(match, "H9")
+    assert h9["team"] == "Home"
+    assert (h9["shots"], h9["shots_on_target"]) == (2, 1)
+    assert h9["goals"] == [{"event_id": 4, "minute": 1, "score_after": "1-0"}]
+    assert h9["set_up_goals"] == []  # his own goal is in "goals", not here
+    assert h9["passes_attempted"] == 0 and h9["pass_accuracy"] == 0.0
+    assert (h9["first_minute"], h9["last_minute"]) == (1, 12)
+    assert h9["event_ids"] == [4, 14]
+
+
+def test_player_stats_for_a_ball_winner_who_started_a_counter(match: Match) -> None:
+    h4 = player_stats(match, "H4")
+    assert h4["interceptions_won"] == 1 and h4["tackles_won"] == 0
+    assert (h4["passes_attempted"], h4["passes_completed"], h4["pass_accuracy"]) == (1, 1, 100.0)
+    assert [(c["minute"], c["outcome"]) for c in h4["counterattacks"]] == [(11, "saved")]
+    assert h4["event_ids"] == [7]
+
+
+def test_player_stats_count_goals_set_up_by_being_in_the_build_up(match: Match) -> None:
+    h7 = player_stats(match, "H7")
+    assert h7["passes_attempted"] == 2  # the kickoff is not a pass
+    assert [g["minute"] for g in h7["set_up_goals"]] == [1]
+    assert len(h7["counterattacks"]) == 1
+
+
+def test_player_stats_reject_a_player_who_did_not_play(match: Match) -> None:
+    with pytest.raises(ValueError, match="H11"):
+        player_stats(match, "H11")
+
+
+def test_players_lists_home_then_away_by_shirt_number(match: Match) -> None:
+    listed = players(match)
+    assert listed[:3] == ["H4", "H6", "H7"]
+    assert listed.index("H10") < listed.index("A1")
+    assert listed[-1] == "A10"

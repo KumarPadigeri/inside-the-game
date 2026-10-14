@@ -2,7 +2,7 @@
 
 Containers (all partitioned by /match_id):
     matches - one document per synthetic match, events included
-    recaps  - one document per (match, style, language) verified recap
+    recaps  - one document per (match, style, language, focus) verified recap
     moments - goals and counterattacks with embedding vectors, for vector search
     commentary - one saved live-mode run per (match, style, language), for free replays
 
@@ -51,6 +51,8 @@ def attach_recap_styles(matches: list[dict[str, Any]], recap_rows: list[dict[str
     """
     saved: dict[str, set[tuple[str, str]]] = {}
     for row in recap_rows:
+        if row.get("focus"):
+            continue  # personalized recaps are extras, not the match's main recaps
         saved.setdefault(row["match_id"], set()).add((row["style"], row.get("language", "en")))
     return [
         {**match, "recaps": [{"style": s, "language": lang} for s, lang in sorted(saved.get(match["match_id"], set()))]}
@@ -58,18 +60,21 @@ def attach_recap_styles(matches: list[dict[str, Any]], recap_rows: list[dict[str
     ]
 
 
-def recap_id(match_id: str, style: Style, language: Language = "en") -> str:
-    """English keeps the original id (match_001-fan); other languages add theirs (match_001-fan-es)."""
-    return f"{match_id}-{style}" if language == "en" else f"{match_id}-{style}-{language}"
+def recap_id(match_id: str, style: Style, language: Language = "en", focus: str = "") -> str:
+    """English keeps the original id (match_001-fan); other languages add theirs (match_001-fan-es),
+    and personalized recaps their focus (match_001-fan-away, match_001-analyst-es-h9)."""
+    parts = [match_id, style, *([language] if language != "en" else []), *([focus.lower()] if focus else [])]
+    return "-".join(parts)
 
 
 def recap_to_doc(match_id: str, result: VerifiedRecap) -> dict[str, Any]:
     """A verified recap as a Cosmos document, one per match, style and language."""
     return {
-        "id": recap_id(match_id, result.recap.style, result.recap.language),
+        "id": recap_id(match_id, result.recap.style, result.recap.language, result.recap.focus),
         "match_id": match_id,
         "style": result.recap.style,
         "language": result.recap.language,
+        "focus": result.recap.focus,
         "created_at": datetime.now(timezone.utc).isoformat(),
         **result.model_dump(),
     }
@@ -82,7 +87,7 @@ def doc_to_recap(doc: dict[str, Any]) -> VerifiedRecap:
 def commentary_to_doc(match_id: str, commentary: LiveCommentary) -> dict[str, Any]:
     """A live run's commentary as a Cosmos document, one per match, style and language."""
     return {
-        "id": recap_id(match_id, commentary.style, commentary.language),
+        "id": recap_id(match_id, commentary.style, commentary.language, commentary.focus),
         "match_id": match_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         **commentary.model_dump(),
@@ -136,15 +141,17 @@ class Store:
         """Match summaries (no events), ordered by match_id, with the recaps saved for each."""
         query = "SELECT c.match_id, c.home_team, c.away_team, c.score FROM c ORDER BY c.match_id"
         matches = [item async for item in self.matches.query_items(query)]
-        recap_rows = [item async for item in self.recaps.query_items("SELECT c.match_id, c.style, c.language FROM c")]
+        recap_rows = [item async for item in self.recaps.query_items("SELECT c.match_id, c.style, c.language, c.focus FROM c")]
         return attach_recap_styles(matches, recap_rows)
 
     async def save_recap(self, match_id: str, result: VerifiedRecap) -> None:
         await self.recaps.upsert_item(recap_to_doc(match_id, result))
 
-    async def get_recap(self, match_id: str, style: Style, language: Language = "en") -> VerifiedRecap | None:
+    async def get_recap(
+        self, match_id: str, style: Style, language: Language = "en", focus: str = ""
+    ) -> VerifiedRecap | None:
         try:
-            doc = await self.recaps.read_item(recap_id(match_id, style, language), partition_key=match_id)
+            doc = await self.recaps.read_item(recap_id(match_id, style, language, focus), partition_key=match_id)
             return doc_to_recap(doc)
         except CosmosResourceNotFoundError:
             return None
@@ -152,9 +159,11 @@ class Store:
     async def save_commentary(self, match_id: str, commentary: LiveCommentary) -> None:
         await self.commentary.upsert_item(commentary_to_doc(match_id, commentary))
 
-    async def get_commentary(self, match_id: str, style: Style, language: Language = "en") -> LiveCommentary | None:
+    async def get_commentary(
+        self, match_id: str, style: Style, language: Language = "en", focus: str = ""
+    ) -> LiveCommentary | None:
         try:
-            doc = await self.commentary.read_item(recap_id(match_id, style, language), partition_key=match_id)
+            doc = await self.commentary.read_item(recap_id(match_id, style, language, focus), partition_key=match_id)
             return LiveCommentary.model_validate(doc)
         except CosmosResourceNotFoundError:
             return None

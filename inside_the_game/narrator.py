@@ -37,12 +37,43 @@ LANGUAGES: dict[Language, str] = {
     "hi": "Hindi",
 }
 
+# Personalization: "" (neutral), a club the reader supports ("Home" / "Away"), or a player they follow ("H9").
+FOCUS_PATTERN = r"^(Home|Away|[HA][0-9]{1,2})?$"
+
+
+def focus_player(focus: str) -> str | None:
+    """The followed player's id in player focus mode, else None."""
+    return focus if focus and focus not in ("Home", "Away") else None
+
+
 STYLE_GUIDES: dict[Style, str] = {
     "fan": "Write as a passionate supporter of the winning team (or the home team after a draw): "
     "emotional, vivid, proud, but still factual.",
     "analyst": "Write as a calm tactical analyst: precise, measured, focused on why things happened.",
     "broadcaster": "Write as a TV broadcaster wrapping up the match: lively, balanced between both teams.",
 }
+
+def style_guide(style: Style, match: Match, focus: str = "") -> str:
+    """The voice to write in, personalized for a supported club or a followed player."""
+    if focus in ("Home", "Away"):
+        club = match.home_team if focus == "Home" else match.away_team
+        return {
+            "fan": f"Write as a passionate supporter of {club}, speaking as one of them (\"we\", \"us\", \"our\" = "
+            f"{club}): emotional and vivid, proud of the good moments and gutted by the bad ones, but still factual.",
+            "analyst": f"Write as {club}'s own tactical analyst: precise and measured, focused on what went right "
+            f"and wrong for {club}.",
+            "broadcaster": f"Write as the presenter on {club}'s club channel: lively and focused on {club}, "
+            "but fair to the opponent.",
+        }[style]
+    player = focus_player(focus)
+    if player:
+        team = match.home_team if player.startswith("H") else match.away_team
+        return (
+            f"{STYLE_GUIDES[style]} This recap follows player {player} of {team}: centre it on what {player} did, "
+            f"using the findings about {player}, with the rest of the match as context. Name {player} in the headline."
+        )
+    return STYLE_GUIDES[style]
+
 
 INSTRUCTIONS = """\
 You are a football writer. You turn numbered findings about a match into a
@@ -92,6 +123,7 @@ class RecapSentence(BaseModel):
 class Recap(BaseModel):
     style: Style
     language: Language = "en"  # recaps saved before languages existed are English
+    focus: str = ""  # personalization: "", "Home" / "Away" (supported club) or a followed player id
     headline: RecapSentence
     sentences: list[RecapSentence]
 
@@ -109,7 +141,12 @@ def language_rule(language: Language) -> str:
 
 
 def build_prompt(
-    match: Match, report: AnalystReport, style: Style, feedback: str | None = None, language: Language = "en"
+    match: Match,
+    report: AnalystReport,
+    style: Style,
+    feedback: str | None = None,
+    language: Language = "en",
+    focus: str = "",
 ) -> str:
     """The message sent to the Narrator: style, language, teams and numbered findings (no event_ids).
 
@@ -120,7 +157,7 @@ def build_prompt(
         for i, f in enumerate(report.findings, start=1)
     ]
     prompt = (
-        f"Style: {STYLE_GUIDES[style]}\n"
+        f"Style: {style_guide(style, match, focus)}\n"
         f"{language_rule(language)}"
         f"Home team: {match.home_team}. Away team: {match.away_team}.\n"
         f"Findings:\n{json.dumps(findings, indent=1)}"
@@ -135,7 +172,7 @@ def build_prompt(
 
 
 def resolve_recap(
-    output: NarratorOutput, report: AnalystReport, style: Style, language: Language = "en"
+    output: NarratorOutput, report: AnalystReport, style: Style, language: Language = "en", focus: str = ""
 ) -> Recap:
     """Attach the real evidence (event_ids and tools) to each sentence, via the findings it cites."""
 
@@ -157,6 +194,7 @@ def resolve_recap(
     return Recap(
         style=style,
         language=language,
+        focus=focus,
         headline=resolve(output.headline),
         sentences=[resolve(s) for s in output.sentences],
     )
@@ -173,14 +211,19 @@ def make_narrator(client: FoundryChatClient | None = None) -> Agent:
 
 
 async def narrate(
-    match: Match, report: AnalystReport, style: Style, feedback: str | None = None, language: Language = "en"
+    match: Match,
+    report: AnalystReport,
+    style: Style,
+    feedback: str | None = None,
+    language: Language = "en",
+    focus: str = "",
 ) -> Recap:
     """Run the Narrator and return a recap with evidence attached to every sentence."""
-    response = await make_narrator().run(build_prompt(match, report, style, feedback, language))
+    response = await make_narrator().run(build_prompt(match, report, style, feedback, language, focus))
     output = response.value
     if output is None:
         raise ValueError(f"Narrator returned no structured recap: {response.text!r}")
-    return resolve_recap(output, report, style, language)
+    return resolve_recap(output, report, style, language, focus)
 
 
 def main() -> None:

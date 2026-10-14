@@ -11,8 +11,9 @@
                                                    saved commentary if there is any; free, no AI
     POST /api/matches/{match_id}/live/{style}      play it live with fresh commentary from the
                                                    Commentator and Verifier agents, then save it
-    Recap and live endpoints take ?language=en|es|fr|pt|hi (default en);
-    live ones also take ?seconds_per_minute= (default 1).
+    Recap and live endpoints take ?language=en|es|fr|pt|hi (default en) and ?focus= to personalize:
+    Home / Away (the club the reader supports) or, for recaps, a player id (player focus mode).
+    Live ones also take ?seconds_per_minute= (default 1).
 
 Generating calls the AI models (it costs credit), so the POST needs the
 X-Recap-Passcode header to match RECAP_PASSCODE. Reading is open to everyone.
@@ -43,7 +44,7 @@ from inside_the_game.analyst import build_tools
 from inside_the_game.foundry import running_in_azure
 from inside_the_game.generator import Match
 from inside_the_game.live import LiveCommentary
-from inside_the_game.narrator import Language, Style
+from inside_the_game.narrator import FOCUS_PATTERN, Language, Style, focus_player
 from inside_the_game.verifier import VerifiedRecap
 
 
@@ -66,9 +67,13 @@ class MatchStore(Protocol):
 
     async def list_matches(self) -> list[dict[str, Any]]: ...
     async def get_match(self, match_id: str) -> Match | None: ...
-    async def get_recap(self, match_id: str, style: Style, language: Language = "en") -> VerifiedRecap | None: ...
+    async def get_recap(
+        self, match_id: str, style: Style, language: Language = "en", focus: str = ""
+    ) -> VerifiedRecap | None: ...
     async def save_recap(self, match_id: str, result: VerifiedRecap) -> None: ...
-    async def get_commentary(self, match_id: str, style: Style, language: Language = "en") -> LiveCommentary | None: ...
+    async def get_commentary(
+        self, match_id: str, style: Style, language: Language = "en", focus: str = ""
+    ) -> LiveCommentary | None: ...
     async def save_commentary(self, match_id: str, commentary: LiveCommentary) -> None: ...
 
 
@@ -100,8 +105,17 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    RecapFocus = Query(default="", pattern=FOCUS_PATTERN, description="Home / Away, or a player id like H9")
+    LiveFocus = Query(default="", pattern=r"^(Home|Away)?$", description="The club the commentary supports")
+
     def get_store(request: Request) -> MatchStore:
         return request.app.state.store
+
+    def check_player(match: Match, focus: str) -> None:
+        """Player focus needs a player who actually played in this match."""
+        player = focus_player(focus)
+        if player and not any(e.player == player for e in match.events):
+            raise HTTPException(status_code=422, detail=f"Player {player} did not play in {match.match_id}")
 
     async def require_match(request: Request, match_id: str) -> Match:
         match = await get_store(request).get_match(match_id)
@@ -123,14 +137,18 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
         return {**match.to_dict(), "score": match.score()}
 
     @app.get("/api/matches/{match_id}/stats")
-    async def get_stats(request: Request, match_id: str) -> dict[str, Any]:
-        """The same tool results the agents saw, keyed by tool name."""
+    async def get_stats(request: Request, match_id: str, player: str | None = None) -> dict[str, Any]:
+        """The same tool results the agents saw, keyed by tool name (with ?player=, get_player_stats too)."""
         match = await require_match(request, match_id)
-        return {t.name: t.func() for t in build_tools(match)}
+        if player:
+            check_player(match, player)
+        return {t.name: t.func() for t in build_tools(match, player)}
 
     @app.get("/api/matches/{match_id}/recaps/{style}")
-    async def get_recap(request: Request, match_id: str, style: Style, language: Language = "en") -> VerifiedRecap:
-        recap = await get_store(request).get_recap(match_id, style, language)
+    async def get_recap(
+        request: Request, match_id: str, style: Style, language: Language = "en", focus: str = RecapFocus
+    ) -> VerifiedRecap:
+        recap = await get_store(request).get_recap(match_id, style, language, focus)
         if recap is None:
             raise HTTPException(status_code=404, detail=f"No {style} recap in {language!r} for {match_id!r} yet")
         return recap
@@ -141,15 +159,17 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
         match_id: str,
         style: Style,
         language: Language = "en",
+        focus: str = RecapFocus,
         passcode: str | None = Header(default=None, alias=PASSCODE_HEADER),
     ) -> EventSourceResponse:
         check_passcode(passcode)
         match = await require_match(request, match_id)
+        check_player(match, focus)
         store_ = get_store(request)
 
         async def events() -> AsyncIterator[dict[str, str]]:
             try:
-                async for item in workflow.stream_recap(match, style, language):
+                async for item in workflow.stream_recap(match, style, language, focus):
                     if isinstance(item, VerifiedRecap):
                         await store_.save_recap(match_id, item)
                         yield {"event": "recap", "data": item.model_dump_json()}
@@ -194,13 +214,20 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
         match_id: str,
         style: Style,
         language: Language = "en",
+        focus: str = LiveFocus,
         seconds_per_minute: float = SecondsPerMinute,
     ) -> EventSourceResponse:
         """Free for everyone: live stats from code, plus saved commentary if this match has some."""
         match = await require_match(request, match_id)
-        saved = await get_store(request).get_commentary(match_id, style, language)
+        saved = await get_store(request).get_commentary(match_id, style, language, focus)
         commentator = live.replay_commentator(saved) if saved else None
-        start = {"match_id": match_id, "style": style, "language": language, "commentary": "saved" if saved else "none"}
+        start = {
+            "match_id": match_id,
+            "style": style,
+            "language": language,
+            "focus": focus,
+            "commentary": "saved" if saved else "none",
+        }
         return live_events(match, commentator, seconds_per_minute, start)
 
     @app.post("/api/matches/{match_id}/live/{style}")
@@ -209,6 +236,7 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
         match_id: str,
         style: Style,
         language: Language = "en",
+        focus: str = LiveFocus,
         seconds_per_minute: float = SecondsPerMinute,
         passcode: str | None = Header(default=None, alias=PASSCODE_HEADER),
     ) -> EventSourceResponse:
@@ -220,10 +248,10 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
 
         async def save(lines: list[dict[str, Any]]) -> None:
             if lines:
-                await store_.save_commentary(match_id, live.collect(lines, style, language))
+                await store_.save_commentary(match_id, live.collect(lines, style, language, focus))
 
-        start = {"match_id": match_id, "style": style, "language": language, "commentary": "live"}
-        return live_events(match, make_commentator(style, language), seconds_per_minute, start, on_done=save)
+        start = {"match_id": match_id, "style": style, "language": language, "focus": focus, "commentary": "live"}
+        return live_events(match, make_commentator(style, language, focus), seconds_per_minute, start, on_done=save)
 
     return app
 

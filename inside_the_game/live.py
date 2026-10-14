@@ -67,6 +67,7 @@ class LiveCommentary(BaseModel):
 
     style: Style
     language: Language = "en"
+    focus: str = ""  # "" or the supported club ("Home" / "Away")
     lines: list[Commentary]
 
 
@@ -324,10 +325,10 @@ def replay_commentator(saved: LiveCommentary) -> Commentator:
     return replay
 
 
-def collect(lines: list[dict[str, Any]], style: Style, language: Language) -> LiveCommentary:
+def collect(lines: list[dict[str, Any]], style: Style, language: Language, focus: str = "") -> LiveCommentary:
     """Gather the commentary messages of a run, in match order, for saving."""
     parsed = sorted((Commentary.model_validate(line) for line in lines), key=lambda c: c.moment.minute)
-    return LiveCommentary(style=style, language=language, lines=parsed)
+    return LiveCommentary(style=style, language=language, focus=focus, lines=parsed)
 
 
 def main() -> None:
@@ -337,6 +338,7 @@ def main() -> None:
     parser.add_argument("--commentary", action="store_true", help="run the Commentator and Verifier agents")
     parser.add_argument("--style", choices=list(STYLE_GUIDES), default="broadcaster")
     parser.add_argument("--language", choices=list(LANGUAGES), default="en")
+    parser.add_argument("--focus", default="", choices=["", "Home", "Away"], help="the club the commentary supports")
     parser.add_argument("--save", action="store_true", help="save the commentary to Cosmos DB")
     args = parser.parse_args()
 
@@ -351,7 +353,7 @@ def main() -> None:
         if args.commentary:
             from inside_the_game.commentator import make_commentator
 
-            commentator = make_commentator(args.style, args.language)
+            commentator = make_commentator(args.style, args.language, args.focus)
         lines: list[dict[str, Any]] = []
         async for kind, data in live.run_live(match, commentator, args.speed):
             if kind == "tick" and data["minute"] % 15 == 0:
@@ -368,7 +370,7 @@ def main() -> None:
             from inside_the_game.store import Store
 
             async with Store() as store:
-                await store.save_commentary(match.match_id, live.collect(lines, args.style, args.language))
+                await store.save_commentary(match.match_id, live.collect(lines, args.style, args.language, args.focus))
             print("Saved the commentary to Cosmos DB")
 
     asyncio.run(run())

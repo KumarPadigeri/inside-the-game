@@ -5,7 +5,14 @@ from pydantic import ValidationError
 
 from inside_the_game.analyst import AnalystReport, Finding
 from inside_the_game.generator import generate_match
-from inside_the_game.narrator import NarratedSentence, NarratorOutput, build_prompt, resolve_recap
+from inside_the_game.narrator import (
+    NarratedSentence,
+    NarratorOutput,
+    build_prompt,
+    focus_player,
+    resolve_recap,
+    style_guide,
+)
 
 REPORT = AnalystReport(
     findings=[
@@ -77,3 +84,14 @@ def test_prompt_marks_comparisons_with_other_matches() -> None:
     )
     prompt = build_prompt(generate_match(1), report, "fan")
     assert prompt.count('"about": "other matches"') == 1
+
+
+def test_personalized_voices_for_a_club_and_a_player() -> None:
+    match = generate_match(1)  # Eastmoor United v Ashvale Town
+    assert "supporter of Eastmoor United" in style_guide("fan", match, "Home")
+    assert "Ashvale Town's own tactical analyst" in style_guide("analyst", match, "Away")
+    assert "club channel" in style_guide("broadcaster", match, "Home")
+    follows = style_guide("analyst", match, "A11")
+    assert "follows player A11 of Ashvale Town" in follows and "headline" in follows
+    assert "A11" in build_prompt(match, REPORT, "analyst", focus="A11")
+    assert (focus_player(""), focus_player("Home"), focus_player("A11")) == (None, None, "A11")

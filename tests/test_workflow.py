@@ -37,12 +37,18 @@ def _install_fakes(
             raise comparisons
         return comparisons or []
 
-    async def fake_analyse(match: Match) -> AnalystReport:
+    async def fake_analyse(match: Match, player: str | None = None) -> AnalystReport:
+        seen["player"] = player
         calls.append("analyse")
         return FAKE_REPORT
 
     async def fake_narrate(
-        match: Match, report: AnalystReport, style: Style, feedback: str | None = None, language: Language = "en"
+        match: Match,
+        report: AnalystReport,
+        style: Style,
+        feedback: str | None = None,
+        language: Language = "en",
+        focus: str = "",
     ) -> Recap:
         calls.append("rewrite" if feedback else "narrate")
         seen.setdefault("languages", []).append(language)  # type: ignore[union-attr]
@@ -53,7 +59,7 @@ def _install_fakes(
         if narrator_cites_comparisons and any(f.tool == retrieval.TOOL_NAME for f in report.findings):
             tools.append(retrieval.TOOL_NAME)
         sentence = RecapSentence(text=f"Draft {n}.", finding_ids=[1], event_ids=[], tools=tools)
-        return Recap(style=style, language=language, headline=sentence, sentences=[sentence])
+        return Recap(style=style, language=language, focus=focus, headline=sentence, sentences=[sentence])
 
     async def fake_verify(match: Match, recap: Recap, comparisons: list[Comparison] | None = None) -> list[SentenceVerdict]:
         calls.append("verify")
@@ -131,3 +137,16 @@ def test_language_reaches_every_narrator_call_and_the_output(monkeypatch: pytest
     result = asyncio.run(run_recap(MATCH, "fan", "es"))
     assert seen["languages"] == ["es", "es"]  # first draft and the rewrite
     assert result.recap.language == "es"
+
+
+def test_player_focus_reaches_the_analyst_and_the_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, seen = _install_fakes(monkeypatch, [[True, True]])
+    result = asyncio.run(run_recap(MATCH, "analyst", focus="H9"))
+    assert seen["player"] == "H9"
+    assert result.recap.focus == "H9"
+
+
+def test_club_focus_is_not_a_player(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, seen = _install_fakes(monkeypatch, [[True, True]])
+    result = asyncio.run(run_recap(MATCH, "fan", focus="Away"))
+    assert seen["player"] is None and result.recap.focus == "Away"

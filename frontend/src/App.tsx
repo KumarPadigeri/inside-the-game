@@ -30,6 +30,7 @@ import { sentenceEvents } from './matchEvents'
 import { PERSONAS } from './personas'
 import { applyTheme, loadTheme, type Theme } from './theme'
 import { loadLanguage, saveLanguage } from './language'
+import { focusLabel, playerOptions } from './focus'
 import { EMPTY_PIPELINE, applyProgress, type PipelineState } from './pipelineState'
 
 const PASSCODE_KEY = 'itg-demo-passcode'
@@ -66,6 +67,7 @@ export default function App() {
   const [matchId, setMatchId] = useState<string | null>(null)
   const [style, setStyle] = useState<Style>('broadcaster')
   const [language, setLanguage] = useState<Language>(loadLanguage)
+  const [focus, setFocus] = useState('') // personalization: '', 'Home' / 'Away' (supported club) or a player id
   const [match, setMatch] = useState<Match | null>(null)
   const [stats, setStats] = useState<Stats | null>(null)
   const [result, setResult] = useState<VerifiedRecap | null>(null)
@@ -117,7 +119,8 @@ export default function App() {
   useEffect(() => {
     if (!matchId) return
     let cancelled = false
-    Promise.all([getMatch(matchId), getStats(matchId), getRecap(matchId, style, language)])
+    const player = focus === 'Home' || focus === 'Away' ? '' : focus
+    Promise.all([getMatch(matchId), getStats(matchId, player), getRecap(matchId, style, language, focus)])
       .then(([m, s, r]) => {
         if (cancelled) return
         setMatch(m)
@@ -130,20 +133,22 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [matchId, style, language])
+  }, [matchId, style, language, focus])
 
   // When comparing, load the right pane's saved recap too.
-  const otherKey = `${matchId}/${other.style}/${other.language}`
+  const otherKey = `${matchId}/${other.style}/${other.language}/${focus}`
   useEffect(() => {
     if (!compare || !matchId) return
     let cancelled = false
-    getRecap(matchId, other.style, other.language)
-      .then((r) => !cancelled && setOtherRecap({ key: `${matchId}/${other.style}/${other.language}`, result: r }))
+    getRecap(matchId, other.style, other.language, focus)
+      .then(
+        (r) => !cancelled && setOtherRecap({ key: `${matchId}/${other.style}/${other.language}/${focus}`, result: r }),
+      )
       .catch((e: Error) => !cancelled && setError(e.message))
     return () => {
       cancelled = true
     }
-  }, [compare, matchId, other.style, other.language])
+  }, [compare, matchId, other.style, other.language, focus])
 
   const livePlaying = live.status === 'playing' || liveB.state.status === 'playing'
 
@@ -191,7 +196,16 @@ export default function App() {
     if (next === mode) return
     resetLive()
     setAskPasscode(null)
+    // Live commentary personalizes by club only: following a player is a recap feature.
+    if (next === 'live' && focus !== 'Home' && focus !== 'Away' && focus) chooseFocus('')
     setMode(next)
+  }
+
+  function chooseFocus(next: string) {
+    if (next === focus) return
+    resetView()
+    setLoading(true)
+    setFocus(next)
   }
 
   /** Play the match live: free with saved (or no) commentary; with `generate`, the agents commentate now. */
@@ -200,7 +214,7 @@ export default function App() {
     resetLive()
     setAskPasscode(null)
     setError(null)
-    const base = { matchId, generate, passcode: code, secondsPerMinute: speed }
+    const base = { matchId, generate, passcode: code, secondsPerMinute: speed, focus }
     try {
       // Comparing plays both panes on the same clock (replays only: the agents commentate one view at a time).
       await Promise.all([
@@ -224,6 +238,7 @@ export default function App() {
     setMatch(null) // so the old scoreboard doesn't linger while the new match loads
     setStats(null)
     setLoading(true)
+    setFocus('') // clubs and players belong to the match
     setMatchId(id)
   }
 
@@ -249,7 +264,7 @@ export default function App() {
     setError(null)
     resetView()
     try {
-      const recap = await generateRecap(matchId, style, language, code, (p) =>
+      const recap = await generateRecap(matchId, style, language, focus, code, (p) =>
         setPipeline((state) => applyProgress(state, p)),
       )
       setResult(recap)
@@ -258,7 +273,7 @@ export default function App() {
       // Mark the new recap in the match list.
       setMatches((list) =>
         list.map((m) =>
-          m.match_id === matchId && !hasRecap(m, style, language)
+          m.match_id === matchId && !focus && !hasRecap(m, style, language)
             ? { ...m, recaps: [...(m.recaps ?? []), { style, language }] }
             : m,
         ),
@@ -270,7 +285,7 @@ export default function App() {
         setAskPasscode('recap')
         // Bring back the saved recap (if any) that was cleared when we started.
         if (matchId) {
-          getRecap(matchId, style, language)
+          getRecap(matchId, style, language, focus)
             .then((r) => setResult(r))
             .catch(() => {})
         }
@@ -462,6 +477,32 @@ export default function App() {
                     </label>
                   </>
                 )}
+                {match && (
+                  <label className="language focus">
+                    <HeartIcon />
+                    <select
+                      aria-label="Personalize: a club you support or a player to follow"
+                      value={focus}
+                      onChange={(e) => chooseFocus(e.target.value)}
+                      disabled={running || livePlaying}
+                    >
+                      <option value="">Neutral</option>
+                      <optgroup label="Support a club">
+                        <option value="Home">{match.home_team}</option>
+                        <option value="Away">{match.away_team}</option>
+                      </optgroup>
+                      {!isLive && (
+                        <optgroup label="Follow a player">
+                          {playerOptions(match).map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </label>
+                )}
                 {askPasscode ? (
                   <form
                     className="passcode"
@@ -625,8 +666,9 @@ export default function App() {
           ) : (
             !running && (
               <p className="empty">
-                No {style} recap ({LANGUAGES[language]}) for this match yet. Generating one runs the four agents live
-                (it takes a minute or two) and needs the demo passcode.
+                No {style} recap ({LANGUAGES[language]}
+                {focus && `, for ${focusLabel(focus, match)}`}) for this match yet. Generating one runs the four agents
+                live (it takes a minute or two) and needs the demo passcode.
               </p>
             )
           )}
@@ -655,6 +697,22 @@ function RecapMarks({ styles, language }: { styles: Style[]; language: Language 
         </span>
       ))}
     </span>
+  )
+}
+
+function HeartIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" />
+    </svg>
   )
 }
 

@@ -53,6 +53,7 @@ export interface LiveRequest {
   matchId: string
   style: Style
   language: Language
+  focus: string // '' or the supported club ('Home' / 'Away')
   generate: boolean // true: the agents commentate now (needs the passcode)
   passcode: string
   secondsPerMinute: number

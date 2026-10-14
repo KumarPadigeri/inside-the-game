@@ -43,6 +43,8 @@ def test_english_keeps_the_original_recap_id_and_other_languages_add_theirs() ->
     assert recap_id("match_003", "fan") == "match_003-fan"
     assert recap_id("match_003", "fan", "en") == "match_003-fan"
     assert recap_id("match_003", "fan", "es") == "match_003-fan-es"
+    assert recap_id("match_003", "fan", "en", "Away") == "match_003-fan-away"
+    assert recap_id("match_003", "analyst", "es", "H9") == "match_003-analyst-es-h9"
 
 
 def test_recap_saved_before_languages_existed_reads_as_english() -> None:
@@ -59,6 +61,7 @@ def test_match_summaries_list_their_saved_recaps() -> None:
         {"match_id": "match_001", "style": "analyst", "language": "en"},
         {"match_id": "match_001", "style": "fan", "language": "es"},
         {"match_id": "match_009", "style": "fan"},  # a recap for a match not in the list is ignored
+        {"match_id": "match_001", "style": "fan", "language": "fr", "focus": "H9"},  # personalized: not listed
     ]
     assert attach_recap_styles(matches, rows) == [
         {

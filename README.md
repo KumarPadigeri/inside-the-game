@@ -95,6 +95,7 @@ Other useful commands:
 | Command | What it does |
 |---|---|
 | `python -m inside_the_game.generator --count 5` | Write synthetic matches to `data/matches/` |
+| `python -m inside_the_game.workflow --seed 1 --style fan --focus Home` | One personalized recap (a club, or a player id like `A11`) |
 | `python -m inside_the_game.pregenerate --count 5` | Pre-generate recaps for the demo (add `--redo-removed` to retry ones that lost sentences, `--languages es fr` for other languages) |
 | `python -m inside_the_game.workflow --diagram` | Print the workflow graph as Mermaid |
 | `TRACING=1 python -m inside_the_game.workflow ...` | Send traces to Application Insights from your machine |
@@ -139,6 +140,14 @@ Path parameters: `match_id` is `match_001` … `match_030`; `style` is `fan`, `a
 Both recap endpoints take an optional `?language=` query parameter: `en` (default), `es`, `fr`, `pt` or `hi`.
 The Narrator writes in that language and the Verifier checks it against the same evidence; team names, player ids
 and numbers stay exactly as in the data.
+
+They also take `?focus=` to **personalize** (saved as separate recaps):
+
+- `Home` / `Away`: written for that club's supporters. The fan speaks as one of them ("we", "our"), the analyst
+  explains what went right and wrong for them, the broadcaster presents for their club channel.
+- a player id such as `H9` (recaps only): **player focus mode**. The Analyst also calls `get_player_stats`
+  (passing, shots, goals, tackles and interceptions won, and the goals and counterattacks the player was part
+  of, all computed by code), and the recap follows that player. `GET /stats?player=H9` returns that tool result too.
 
 ### `GET /api/matches`
 

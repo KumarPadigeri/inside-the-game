@@ -151,3 +151,86 @@ def counterattacks(match: Match) -> list[Counterattack]:
                 }
             )
     return result
+
+
+class PlayerGoal(TypedDict):
+    event_id: int
+    minute: int
+    score_after: str  # "Home-Away"
+
+
+class PlayerMove(TypedDict):
+    """A goal or counterattack the player took part in (without scoring it)."""
+
+    minute: int
+    outcome: str  # for a goal: "goal"; for a counterattack: how its shot ended
+    event_ids: list[int]
+
+
+class PlayerStats(TypedDict):
+    player: str
+    team: Team
+    first_minute: int  # first and last minute the player touched the ball
+    last_minute: int
+    passes_attempted: int
+    passes_completed: int
+    pass_accuracy: float
+    shots: int
+    shots_on_target: int
+    goals: list[PlayerGoal]
+    tackles_won: int
+    interceptions_won: int
+    set_up_goals: list[PlayerMove]  # teammates' goals where the player was in the build-up
+    counterattacks: list[PlayerMove]  # counterattacks the player was part of
+    event_ids: list[int]  # the player's shots and ball wins: the moments that show their game
+
+
+def player_stats(match: Match, player: str) -> PlayerStats:
+    """One player's match, from their own events: passing, shooting, winning the ball,
+    and the goals and counterattacks they were part of.
+
+    Raises ValueError if the player has no events in this match.
+    """
+    mine = [e for e in match.events if e.player == player]
+    if not mine:
+        raise ValueError(f"Player {player!r} has no events in {match.match_id}")
+    passes = [e for e in mine if e.type == "pass"]
+    shots_taken = [e for e in mine if e.type == "shot"]
+    completed = sum(e.outcome == "complete" for e in passes)
+    my_ids = {e.event_id for e in mine}
+    all_goals = goals(match)
+    return {
+        "player": player,
+        "team": mine[0].team,
+        "first_minute": mine[0].minute,
+        "last_minute": mine[-1].minute,
+        "passes_attempted": len(passes),
+        "passes_completed": completed,
+        "pass_accuracy": _percent(completed, len(passes)),
+        "shots": len(shots_taken),
+        "shots_on_target": sum(e.outcome in ("goal", "saved") for e in shots_taken),
+        "goals": [
+            {"event_id": g["event_id"], "minute": g["minute"], "score_after": g["score_after"]}
+            for g in all_goals
+            if g["player"] == player
+        ],
+        "tackles_won": sum(e.type == "tackle" and e.outcome == "won" for e in mine),
+        "interceptions_won": sum(e.type == "interception" and e.outcome == "won" for e in mine),
+        "set_up_goals": [
+            {"minute": g["minute"], "outcome": "goal", "event_ids": g["buildup_event_ids"]}
+            for g in all_goals
+            if g["player"] != player and my_ids & set(g["buildup_event_ids"])
+        ],
+        "counterattacks": [
+            {"minute": c["minute"], "outcome": c["outcome"], "event_ids": c["event_ids"]}
+            for c in counterattacks(match)
+            if my_ids & set(c["event_ids"])
+        ],
+        "event_ids": [e.event_id for e in mine if e.type in ("shot", "tackle", "interception")],
+    }
+
+
+def players(match: Match) -> list[str]:
+    """Everyone who touched the ball, home players first, by shirt number."""
+    seen = {(e.team, e.player) for e in match.events}
+    return [p for _, p in sorted(seen, key=lambda tp: (tp[0] != "Home", int(tp[1][1:])))]
