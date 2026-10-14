@@ -198,11 +198,12 @@ h4 {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
 }
 
 main {
+  position: relative; /* for the split handle */
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -210,10 +211,79 @@ main {
   min-height: 0;
 }
 
+/* The match list slides in from the left over the page, and closes when a match is picked. */
 .match-list {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  width: min(300px, 85vw);
   display: flex;
   flex-direction: column;
   min-height: 0;
+  padding: 16px;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.3);
+  transform: translateX(-105%);
+  visibility: hidden;
+  transition:
+    transform 0.2s ease,
+    visibility 0s linear 0.2s;
+}
+
+.match-list.open {
+  transform: none;
+  visibility: visible;
+  transition: transform 0.2s ease;
+}
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.drawer-header h2 {
+  margin: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.matches-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 16px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .match-list,
+  .match-list.open {
+    transition: none;
+  }
 }
 
 /* ---- match list ---- */
@@ -230,6 +300,8 @@ main {
   list-style: none;
   margin: 0;
   padding: 0;
+  /* If the system always shows scrollbars, keep equal space on both sides instead of only on the right. */
+  scrollbar-gutter: stable both-edges;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -238,7 +310,7 @@ main {
   overflow-y: auto;
 }
 
-.match-list button {
+.match-list li button {
   width: 100%;
   display: flex;
   justify-content: space-between;
@@ -251,7 +323,7 @@ main {
   font-size: 0.85rem;
 }
 
-.match-list button.active {
+.match-list li button.active {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
@@ -674,7 +746,9 @@ thead th {
 /* As wide as the evidence panel below it; capped in height on short screens (the drawing stays centred). */
 .stage-pitch {
   position: relative;
-  width: 100%;
+  /* As wide as the pitch drawing at its capped height, so overlays (Replay, notes) sit on the pitch. */
+  width: min(100%, calc(40vh * 109 / 72));
+  justify-self: end;
   aspect-ratio: 109 / 72;
   max-height: 40vh;
 }
@@ -842,17 +916,6 @@ thead th {
   .layout,
   .recap-grid {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .match-list ul {
-    flex-direction: row;
-    overflow-x: auto;
-    max-height: none;
-  }
-
-  .match-list li {
-    flex: none;
-    width: 200px;
   }
 
   /* Small screens: back to a normal scrolling page, everything stacked in one column. */
@@ -1518,4 +1581,638 @@ thead th {
   .step-role:not(.note) {
     display: none;
   }
+}
+
+/* ---- calm dashboard: personalize, agents badge, start here, how it works ---- */
+
+.empty p {
+  margin: 0 0 12px;
+}
+
+.how-button,
+.link-button {
+  border: 0;
+  background: transparent;
+  color: var(--action);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px 4px;
+}
+
+.how-button:hover,
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.icon-button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  width: 36px;
+  height: 36px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Personalize: one button, a small panel with every choice. */
+.personalize {
+  position: relative;
+}
+
+.personalize-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 14px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.personalize-summary {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.personalize-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+
+.personalize-panel {
+  left: 0;
+  width: min(380px, calc(100vw - 32px));
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.personalize-panel fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.personalize-panel fieldset:disabled {
+  opacity: 0.5;
+}
+
+.personalize-panel legend,
+.field-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.persona-option {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.persona-option:hover {
+  background: var(--bg);
+}
+
+.persona-option.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.persona-option > span:last-child,
+.compare-switch > span {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.9rem;
+}
+
+.persona-option .muted,
+.compare-switch .muted {
+  font-size: 0.8rem;
+}
+
+.personalize-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.personalize-row select {
+  width: 100%;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 8px;
+}
+
+.compare-switch {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.compare-switch input {
+  margin-top: 4px;
+}
+
+.controls > .run-agents {
+  margin-left: auto;
+}
+
+/* "Verified by 4 AI agents": opens the pipeline. */
+.agents-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.agents-badge-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.agents-badge-dot.running {
+  animation: pulse 1s ease-in-out infinite;
+}
+
+/* First-visit guidance */
+.start-here {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  padding: 8px 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.start-here ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 0.9rem;
+}
+
+.start-here li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.step-number {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--action);
+  color: var(--on-action);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.start-here-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* How it works */
+.how-it-works {
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.how-it-works::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.how-body {
+  padding: 20px 24px 24px;
+}
+
+.how-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.how-header h2 {
+  margin: 0;
+}
+
+.how-it-works h3 {
+  margin: 20px 0 8px;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.how-lead {
+  font-size: 1.02rem;
+  line-height: 1.6;
+}
+
+.how-try {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* The four agents as a flow: Analyst -> Retrieval -> Narrator -> Verifier */
+.how-flow {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.how-flow li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 0.85rem;
+}
+
+.how-flow span {
+  color: var(--muted);
+}
+
+.how-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.how-chips a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.how-chips a:hover {
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+.how-chips svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.how-chip-role {
+  color: var(--muted);
+}
+
+.how-chip-role::before {
+  content: '·';
+  margin-right: 6px;
+}
+
+@media (max-width: 600px) {
+  .how-flow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .personalize-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The match at a glance: goals above the stat bars */
+.glance-goals {
+  list-style: none;
+  margin: 2px 0 4px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.glance-goals li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.glance-goals .home {
+  color: var(--home);
+}
+
+.glance-goals .away {
+  color: var(--away);
+}
+
+.glance-ball {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--goal);
+}
+
+/* Laptop widths: the glance card keeps the three key bars so the recap keeps its room. */
+@media (min-width: 901px) and (max-width: 1500px) {
+  .live-stats .stat-passes_completed {
+    display: none;
+  }
+}
+
+/* ---- match list: mini rail that opens on hover (mouse screens), like a MudBlazor mini drawer ---- */
+
+.match-list .mini {
+  display: none;
+}
+
+.match-list li button .full {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+@media (hover: hover) and (pointer: fine) and (min-width: 901px) {
+  /* Room for the collapsed rail. */
+  .app {
+    padding-left: 96px;
+  }
+
+  .matches-button,
+  .drawer-header .icon-button {
+    display: none;
+  }
+
+  .match-list {
+    width: 72px;
+    padding: 14px 8px;
+    transform: none;
+    visibility: visible;
+    overflow: hidden;
+    box-shadow: none;
+    transition:
+      width 0.18s ease,
+      box-shadow 0.18s ease;
+  }
+
+  .match-list li button .full,
+  .match-list h2 .full {
+    display: none;
+  }
+
+  /* The collapsed rail scrolls with the wheel but shows no scrollbar (no room for one). */
+  .match-list ul {
+    scrollbar-width: none;
+    scrollbar-gutter: auto;
+  }
+
+  .match-list:is(:hover, :focus-within):not(.picked) ul {
+    scrollbar-width: thin;
+    scrollbar-gutter: stable both-edges;
+  }
+
+  .match-list li button .mini,
+  .match-list h2 .mini {
+    display: flex;
+  }
+
+  .match-list li button {
+    justify-content: center;
+    padding: 6px 4px;
+  }
+
+  .match-list li button .mini {
+    flex-direction: column;
+    align-items: flex-start;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .drawer-header {
+    justify-content: center;
+    min-height: 28px;
+  }
+
+  .drawer-header h2 .mini {
+    justify-content: center;
+    font-size: 1rem;
+    color: var(--muted);
+  }
+
+  /* Hover (or keyboard focus) opens the rail over the page; picking a match closes it. */
+  .match-list:is(:hover, :focus-within):not(.picked) {
+    width: 300px;
+    padding: 14px 16px;
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.3);
+  }
+
+  .match-list:is(:hover, :focus-within):not(.picked) .full {
+    display: flex;
+  }
+
+  .match-list:is(:hover, :focus-within):not(.picked) h2 .full {
+    display: inline;
+  }
+
+  .match-list:is(:hover, :focus-within):not(.picked) .mini {
+    display: none;
+  }
+
+  .match-list:is(:hover, :focus-within):not(.picked) li button {
+    justify-content: space-between;
+    padding: 8px 10px;
+  }
+
+  .match-list:is(:hover, :focus-within):not(.picked) .drawer-header {
+    justify-content: space-between;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .match-list {
+    transition: none;
+  }
+}
+
+/* Sentences are clickable: say so on hover. A small ball marks the sentence shown on the pitch
+   (solid when selected, faint on hover), drawn from the same football as the tab icon. */
+.sentence {
+  position: relative;
+  padding-left: 26px;
+  cursor: pointer;
+}
+
+.sentence::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 14px;
+  width: 12px;
+  height: 12px;
+  background: url('/favicon.svg') center / contain no-repeat;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.sentence.headline::before {
+  top: 19px;
+}
+
+.sentence:hover::before {
+  opacity: 0.45;
+}
+
+.sentence.selected::before {
+  opacity: 1;
+}
+
+.sentence:hover .sentence-evidence {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Live mode, before kick-off: one big obvious action on the pitch */
+.pitch-cta {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 999px;
+  padding: 14px 26px;
+  background: var(--action);
+  color: var(--on-action);
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.pitch-cta:hover {
+  filter: brightness(1.08);
+}
+
+/* The recap/evidence divider: a thin line in the gap between the columns, full height. */
+.split-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 12px;
+  margin-left: -6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.split-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.split-handle:hover::after,
+.split-handle:focus-visible::after,
+.split-handle:active::after {
+  background: var(--action);
+}
+
+.split-handle:focus-visible {
+  outline: none;
 }

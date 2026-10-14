@@ -51,3 +51,30 @@ export function Pipeline({ state }: { state: PipelineState }) {
     </div>
   )
 }
+
+interface AgentsBadgeProps {
+  running: boolean
+  rewrites: number
+  removed: number
+  open: boolean
+  onToggle: () => void
+}
+
+/** One line about how the recap was made; it opens the full pipeline above. */
+export function AgentsBadge({ running, rewrites, removed, open, onToggle }: AgentsBadgeProps) {
+  const details = [
+    rewrites ? `${rewrites} rewrite${rewrites === 1 ? '' : 's'}` : 'passed first time',
+    ...(removed ? [`${removed} removed`] : []),
+  ]
+  return (
+    <button type="button" className="agents-badge" aria-expanded={open} onClick={onToggle}>
+      <span className={running ? 'agents-badge-dot running' : 'agents-badge-dot'} aria-hidden="true">
+        {running ? '' : '✓'}
+      </span>
+      {running ? 'Four agents at work…' : `Verified by 4 AI agents · ${details.join(' · ')}`}
+      <span className="chevron" aria-hidden="true">
+        {open ? '▴' : '▾'}
+      </span>
+    </button>
+  )
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   LANGUAGES,
   PasscodeError,
@@ -21,19 +21,35 @@ import { Pitch } from './components/Pitch'
 import { MatchListSkeleton, RecapSkeleton, ScoreboardSkeleton } from './components/Skeleton'
 import { ThemeToggle } from './components/ThemeToggle'
 import { PersonaIcon } from './components/PersonaIcon'
-import { Pipeline } from './components/Pipeline'
+import { AgentsBadge, Pipeline } from './components/Pipeline'
+import { HowItWorks } from './components/HowItWorks'
+import { Personalize } from './components/Personalize'
+import { StartHere } from './components/StartHere'
+import { SPLIT_DEFAULT, SplitHandle } from './components/SplitHandle'
 import { FactCheckLog, RecapView } from './components/RecapView'
-import { LiveFeed, LiveStats } from './components/Live'
+import { LiveFeed, LiveStats, MatchGlance } from './components/Live'
 import { ComparePane, type Side } from './components/Compare'
 import { useLiveStream, type FeedItem, type LiveState } from './liveState'
 import { sentenceEvents } from './matchEvents'
-import { PERSONAS } from './personas'
 import { applyTheme, loadTheme, type Theme } from './theme'
 import { loadLanguage, saveLanguage } from './language'
-import { focusLabel, playerOptions } from './focus'
+import { focusLabel } from './focus'
+import { useMediaQuery } from './useMediaQuery'
 import { EMPTY_PIPELINE, applyProgress, type PipelineState } from './pipelineState'
 
 const PASSCODE_KEY = 'itg-demo-passcode'
+const OPENING_MATCH = 'match_005' // Ashvale Town 3-2 Harbourside City: a comeback, the best first impression
+
+/** Computers with a mouse get the mini rail that opens on hover; touch screens get the ☰ drawer. Keep in sync with index.css. */
+const RAIL_QUERY = '(hover: hover) and (pointer: fine) and (min-width: 901px)'
+
+/** "Eastmoor United" -> "EU": a club's initials for the collapsed rail. */
+const initials = (team: string) =>
+  team
+    .split(' ')
+    .map((word) => word[0])
+    .join('')
+    .slice(0, 2)
 
 type Mode = 'recap' | 'live'
 
@@ -50,6 +66,18 @@ function loadPasscode(): string {
     return sessionStorage.getItem(PASSCODE_KEY) ?? ''
   } catch {
     return ''
+  }
+}
+
+const SPLIT_KEY = 'itg-split'
+
+/** The recap/evidence split the viewer chose last time (a per-browser convenience). */
+function loadSplit(): number {
+  try {
+    const saved = Number(localStorage.getItem(SPLIT_KEY))
+    return saved >= 35 && saved <= 70 ? saved : SPLIT_DEFAULT
+  } catch {
+    return SPLIT_DEFAULT
   }
 }
 
@@ -88,6 +116,14 @@ export default function App() {
   const live = liveA.state
   const [liveSelected, setLiveSelected] = useState<{ sentence: RecapSentence; item: FeedItem } | null>(null)
   const [speed, setSpeed] = useState(1)
+  const [agentsOpen, setAgentsOpen] = useState(false) // the full agent pipeline under the "Verified by" badge
+  const [howOpen, setHowOpen] = useState(false)
+  const [navOpen, setNavOpen] = useState(false) // the ☰ drawer (touch screens)
+  const rail = useMediaQuery(RAIL_QUERY) // mini rail that opens on hover (mouse screens)
+  const wide = useMediaQuery('(min-width: 901px)') // side-by-side columns (the divider only makes sense then)
+  const [split, setSplit] = useState(loadSplit) // recap side of the recap/evidence split, in percent
+  const mainRef = useRef<HTMLElement>(null)
+  const [railPicked, setRailPicked] = useState(false) // just picked a match: keep the rail shut until the mouse leaves
   const [compare, setCompare] = useState(false) // split view: two personas / languages side by side
   const [other, setOther] = useState<Side>({ style: 'fan', language: 'en' }) // the right pane
   // The right pane's saved recap, tagged with what it was loaded for (a stale tag means it's loading).
@@ -104,7 +140,10 @@ export default function App() {
     listMatches()
       .then((list) => {
         setMatches(list)
-        setMatchId((current) => current ?? list[0]?.match_id ?? null)
+        // Open on the most exciting demo match (a 3-2 comeback) when it's there.
+        setMatchId(
+          (current) => current ?? list.find((m) => m.match_id === OPENING_MATCH)?.match_id ?? list[0]?.match_id ?? null,
+        )
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => {
@@ -232,7 +271,30 @@ export default function App() {
     }
   }
 
+  // Remember the split for next time.
+  useEffect(() => {
+    try {
+      if (split === SPLIT_DEFAULT) localStorage.removeItem(SPLIT_KEY)
+      else localStorage.setItem(SPLIT_KEY, String(split))
+    } catch {
+      // storage blocked: the split just won't be remembered
+    }
+  }, [split])
+
+  // Escape closes the match list.
+  useEffect(() => {
+    if (!navOpen) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setNavOpen(false)
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [navOpen])
+
   function chooseMatch(id: string) {
+    setNavOpen(false) // picking a match closes the list
+    if (rail) {
+      setRailPicked(true)
+      ;(document.activeElement as HTMLElement | null)?.blur() // so keyboard focus doesn't hold the rail open
+    }
     if (id === matchId) return
     resetView()
     setMatch(null) // so the old scoreboard doesn't linger while the new match loads
@@ -296,6 +358,12 @@ export default function App() {
     }
   }
 
+  /** Generate (or regenerate) the recap: asks for the demo passcode first if we don't have it. */
+  function runAgents() {
+    if (passcode) void generate()
+    else setAskPasscode('recap')
+  }
+
   const isLive = mode === 'live'
   const liveMatch: Match | null = match && { ...match, events: live.events }
   const pitchEvents = isLive
@@ -346,40 +414,57 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div>
-          <h1>Inside the Game</h1>
-          <p className="tagline">Match recaps where every sentence shows its proof.</p>
-        </div>
-        <div className="mode-tabs" role="tablist" aria-label="View">
-          {(['recap', 'live'] as const).map((m) => (
-            <button
-              type="button"
-              role="tab"
-              key={m}
-              aria-selected={mode === m}
-              className={mode === m ? 'active' : undefined}
-              onClick={() => chooseMode(m)}
-              disabled={running}
-            >
-              {m === 'recap' ? 'Recap' : 'Live'}
-              {m === 'live' && livePlaying && <span className="live-dot" aria-hidden="true" />}
-            </button>
-          ))}
+        <div className="brand">
+          <button
+            type="button"
+            className="matches-button"
+            aria-expanded={navOpen}
+            aria-controls="match-list"
+            onClick={() => setNavOpen(true)}
+          >
+            <span aria-hidden="true">☰</span> Matches
+          </button>
+          <div>
+            <h1>Inside the Game</h1>
+            <p className="tagline">AI football recaps where every sentence shows its proof.</p>
+          </div>
         </div>
         <div className="topbar-right">
           <p className="synthetic-note">All teams, players and matches are synthetic.</p>
+          <button type="button" className="how-button" onClick={() => setHowOpen(true)}>
+            How it works
+          </button>
           <ThemeToggle theme={theme} onChange={chooseTheme} />
         </div>
       </header>
+      <HowItWorks open={howOpen} onClose={() => setHowOpen(false)} />
 
       <div className="layout">
-        <nav className="match-list" aria-label="Matches">
-          <h2>Matches</h2>
-          {slowStart && (
-            <p className="waking" role="status">
-              Waking up the server… it sleeps when nobody is using it, so the first load takes about 15 seconds.
-            </p>
-          )}
+        {navOpen && <div className="drawer-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+        {/* A mini rail that opens on hover (mouse screens), or a drawer opened by ☰ (touch screens). */}
+        <nav
+          id="match-list"
+          className={`match-list${navOpen ? ' open' : ''}${railPicked ? ' picked' : ''}`}
+          aria-label="Matches"
+          inert={!rail && !navOpen}
+          onMouseLeave={() => setRailPicked(false)}
+        >
+          <div className="drawer-header">
+            <h2>
+              <span className="full">Matches</span>
+              <span className="mini" aria-hidden="true">
+                ☰
+              </span>
+            </h2>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Close the match list"
+              onClick={() => setNavOpen(false)}
+            >
+              ✕
+            </button>
+          </div>
           {listLoading && <MatchListSkeleton />}
           <ul hidden={listLoading}>
             {matches.map((m) => (
@@ -389,17 +474,28 @@ export default function App() {
                   className={m.match_id === matchId ? 'active' : undefined}
                   onClick={() => chooseMatch(m.match_id)}
                   disabled={running}
+                  aria-label={`${m.home_team} ${m.score.Home}, ${m.away_team} ${m.score.Away}`}
                 >
-                  <span className="teams">
-                    {m.home_team}
-                    <br />
-                    {m.away_team}
-                    <RecapMarks styles={STYLES.filter((s) => hasRecap(m, s, language))} language={language} />
+                  <span className="mini" aria-hidden="true">
+                    <span>
+                      {initials(m.home_team)} <b>{m.score.Home}</b>
+                    </span>
+                    <span>
+                      {initials(m.away_team)} <b>{m.score.Away}</b>
+                    </span>
                   </span>
-                  <span className="score">
-                    {m.score.Home}
-                    <br />
-                    {m.score.Away}
+                  <span className="full">
+                    <span className="teams">
+                      {m.home_team}
+                      <br />
+                      {m.away_team}
+                      <RecapMarks styles={STYLES.filter((s) => hasRecap(m, s, language))} language={language} />
+                    </span>
+                    <span className="score">
+                      {m.score.Home}
+                      <br />
+                      {m.score.Away}
+                    </span>
                   </span>
                 </button>
               </li>
@@ -407,9 +503,18 @@ export default function App() {
           </ul>
         </nav>
 
-        <main>
-          {/* The band: scoreboard, styles and agents on the left, the pitch on the right. Same columns as below. */}
-          <section className="stage" aria-label="Match, agents and pitch">
+        <main
+          ref={mainRef}
+          style={{ '--columns': `minmax(0, ${split}fr) minmax(0, ${100 - split}fr)` } as CSSProperties}
+        >
+          {wide && !compare && <SplitHandle split={split} onChange={setSplit} container={mainRef} />}
+          {slowStart && (
+            <p className="waking" role="status">
+              Waking up the server… it sleeps when nobody is using it, so the first load takes about 15 seconds.
+            </p>
+          )}
+          {/* The band: scoreboard, controls and agents on the left, the pitch on the right. Same columns as below. */}
+          <section className="stage" aria-label="Match, controls and pitch">
             <div className="stage-left">
               {!match && <ScoreboardSkeleton />}
               {match && (
@@ -429,80 +534,35 @@ export default function App() {
               )}
 
               <section className="controls">
-                <button
-                  type="button"
-                  className={`compare-toggle${compare ? ' active' : ''}`}
-                  aria-pressed={compare}
-                  onClick={toggleCompare}
-                  disabled={running || livePlaying}
-                  data-tooltip="Two personas or languages side by side"
-                >
-                  <CompareIcon />
-                  Compare
-                </button>
-                {!compare && (
-                  <>
-                    <div className="styles" role="radiogroup" aria-label="Recap style">
-                      {STYLES.map((s) => (
-                        <button
-                          type="button"
-                          key={s}
-                          role="radio"
-                          aria-checked={s === style}
-                          className={s === style ? 'active' : undefined}
-                          onClick={() => chooseStyle(s)}
-                          disabled={running}
-                          data-tooltip={PERSONAS[s]}
-                          aria-description={PERSONAS[s]}
-                        >
-                          <PersonaIcon style={s} />
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                    <label className="language">
-                      <GlobeIcon />
-                      <select
-                        aria-label="Recap language"
-                        value={language}
-                        onChange={(e) => chooseLanguage(e.target.value as Language)}
-                        disabled={running}
-                      >
-                        {Object.entries(LANGUAGES).map(([code, name]) => (
-                          <option key={code} value={code}>
-                            {name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </>
-                )}
-                {match && (
-                  <label className="language focus">
-                    <HeartIcon />
-                    <select
-                      aria-label="Personalize: a club you support or a player to follow"
-                      value={focus}
-                      onChange={(e) => chooseFocus(e.target.value)}
-                      disabled={running || livePlaying}
+                <div className="mode-tabs" role="tablist" aria-label="View">
+                  {(['recap', 'live'] as const).map((m) => (
+                    <button
+                      type="button"
+                      role="tab"
+                      key={m}
+                      aria-selected={mode === m}
+                      className={mode === m ? 'active' : undefined}
+                      onClick={() => chooseMode(m)}
+                      disabled={running}
                     >
-                      <option value="">Neutral</option>
-                      <optgroup label="Support a club">
-                        <option value="Home">{match.home_team}</option>
-                        <option value="Away">{match.away_team}</option>
-                      </optgroup>
-                      {!isLive && (
-                        <optgroup label="Follow a player">
-                          {playerOptions(match).map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.label}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
-                  </label>
-                )}
+                      {m === 'recap' ? 'Recap' : 'Live'}
+                      {m === 'live' && livePlaying && <span className="live-dot" aria-hidden="true" />}
+                    </button>
+                  ))}
+                </div>
+                <Personalize
+                  match={match}
+                  style={style}
+                  language={language}
+                  focus={focus}
+                  compare={compare}
+                  live={isLive}
+                  disabled={running || livePlaying}
+                  onStyle={chooseStyle}
+                  onLanguage={chooseLanguage}
+                  onFocus={chooseFocus}
+                  onCompare={toggleCompare}
+                />
                 {askPasscode ? (
                   <form
                     className="passcode"
@@ -545,26 +605,31 @@ export default function App() {
                             ))}
                           </select>
                         </label>
-                        <button
-                          type="button"
-                          className="primary"
-                          onClick={() => void startLive(false)}
-                          disabled={loading || !matchId}
-                        >
-                          ▶ Watch live
-                        </button>
+                        {/* Before kick-off the big button on the pitch starts it; after full time, this one replays. */}
+                        {live.status === 'done' && (
+                          <button
+                            type="button"
+                            className="primary"
+                            onClick={() => void startLive(false)}
+                            disabled={loading || !matchId}
+                          >
+                            ↻ Watch again
+                          </button>
+                        )}
                       </>
                     )}
                   </div>
                 ) : (
-                  !compare && (
+                  !compare &&
+                  result &&
+                  !running && (
                     <button
                       type="button"
-                      className="primary"
-                      onClick={() => (passcode ? void generate() : setAskPasscode('recap'))}
-                      disabled={running || loading || !matchId}
+                      className="secondary run-agents"
+                      onClick={runAgents}
+                      title="Generate this recap again with the four agents (needs the demo passcode)"
                     >
-                      {running ? 'Agents at work…' : result ? 'Regenerate recap' : 'Generate recap'}
+                      ↻ Run the agents
                     </button>
                   )
                 )}
@@ -581,7 +646,20 @@ export default function App() {
                 </p>
               )}
               {!isLive && !compare && (running || result) && (
+                <AgentsBadge
+                  running={running}
+                  rewrites={running ? pipeline.rewrites : (result?.rewrites ?? 0)}
+                  removed={running ? 0 : (result?.removed.length ?? 0)}
+                  open={agentsOpen || running}
+                  onToggle={() => setAgentsOpen(!agentsOpen)}
+                />
+              )}
+              {!isLive && !compare && (running || (result && agentsOpen)) && (
                 <Pipeline state={result && !running ? doneState(result.rewrites) : pipeline} />
+              )}
+              {!isLive && !compare && !running && !loading && !agentsOpen && <StartHere />}
+              {!isLive && !compare && !running && !loading && !agentsOpen && match && stats && (
+                <MatchGlance match={match} stats={stats} />
               )}
             </div>
             <div className="stage-pitch">
@@ -595,7 +673,12 @@ export default function App() {
                   ↻ Replay
                 </button>
               )}
-              {!loading && note && <p className="stage-pitch-note">{note}</p>}
+              {isLive && live.status === 'idle' && !loading && match && (
+                <button type="button" className="pitch-cta" onClick={() => void startLive(false)}>
+                  <span aria-hidden="true">▶</span> Watch this match live
+                </button>
+              )}
+              {!loading && note && !(isLive && live.status === 'idle') && <p className="stage-pitch-note">{note}</p>}
             </div>
           </section>
           {error && <p className="error">{error}</p>}
@@ -665,11 +748,16 @@ export default function App() {
             </div>
           ) : (
             !running && (
-              <p className="empty">
-                No {style} recap ({LANGUAGES[language]}
-                {focus && `, for ${focusLabel(focus, match)}`}) for this match yet. Generating one runs the four agents
-                live (it takes a minute or two) and needs the demo passcode.
-              </p>
+              <div className="empty">
+                <p>
+                  No {style} recap ({LANGUAGES[language]}
+                  {focus && `, for ${focusLabel(focus, match)}`}) for this match yet. Generating one runs the four
+                  agents live (it takes a minute or two) and needs the demo passcode.
+                </p>
+                <button type="button" className="secondary" onClick={runAgents} disabled={loading || !matchId}>
+                  Run the agents
+                </button>
+              </div>
             )
           )}
         </main>
@@ -697,56 +785,6 @@ function RecapMarks({ styles, language }: { styles: Style[]; language: Language 
         </span>
       ))}
     </span>
-  )
-}
-
-function HeartIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="16"
-      height="16"
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-    >
-      <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" />
-    </svg>
-  )
-}
-
-function CompareIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="16"
-      height="16"
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-    >
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path d="M12 4v16" />
-    </svg>
-  )
-}
-
-function GlobeIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="16"
-      height="16"
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z" />
-    </svg>
   )
 }
 
