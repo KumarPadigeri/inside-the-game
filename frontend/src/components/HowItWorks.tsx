@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 
 // The pipeline in four steps: [agent, what it does in a few words].
 const AGENTS: [name: string, does: string][] = [
-  ['Analyst', 'gets the numbers from stats code'],
+  ['Analyst', 'gets the numbers from stats tools, over MCP'],
   ['Retrieval', 'finds similar moments elsewhere'],
   ['Narrator', 'writes the recap'],
   ['Verifier', 'checks every sentence'],
@@ -19,6 +19,7 @@ const ICONS = {
   globe:
     'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z',
   chart: 'M4 20h16M6 16l4-5 3 3 5-7',
+  plug: 'M9 3v5M15 3v5M7 8h10v4a5 5 0 0 1-10 0zM12 17v4',
   branch: 'M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9c0 4-6 4-12 6',
 }
 
@@ -58,6 +59,12 @@ const TECH: { name: string; role: string; icon: keyof typeof ICONS; docs: string
     role: 'monitoring',
     icon: 'chart',
     docs: 'https://learn.microsoft.com/azure/azure-monitor/app/app-insights-overview',
+  },
+  {
+    name: 'Model Context Protocol',
+    role: 'stats tools server',
+    icon: 'plug',
+    docs: 'https://modelcontextprotocol.io/',
   },
   { name: 'GitHub Actions', role: 'tests + deploys', icon: 'branch', docs: 'https://docs.github.com/actions' },
 ]
