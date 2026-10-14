@@ -15,6 +15,9 @@
     Home / Away (the club the reader supports) or, for recaps, a player id (player focus mode).
     Live ones also take ?seconds_per_minute= (default 1).
 
+    /mcp    the stats tools as an MCP server (streamable HTTP), see mcp_server.py.
+            The Analyst calls its tools through it when the API runs a recap.
+
 Generating calls the AI models (it costs credit), so the POST needs the
 X-Recap-Passcode header to match RECAP_PASSCODE. Reading is open to everyone.
 Without RECAP_PASSCODE, generating is allowed locally and disabled in Azure.
@@ -44,6 +47,7 @@ from inside_the_game.analyst import build_tools
 from inside_the_game.foundry import running_in_azure
 from inside_the_game.generator import Match
 from inside_the_game.live import LiveCommentary
+from inside_the_game.mcp_server import build_mcp_server
 from inside_the_game.narrator import FOCUS_PATTERN, Language, Style, focus_player
 from inside_the_game.verifier import VerifiedRecap
 
@@ -82,22 +86,35 @@ def create_app(store: MatchStore | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-        if store is not None:
-            app.state.store = store
-            yield
-            return
-        from inside_the_game.store import Store  # needs COSMOS_* settings
-        from inside_the_game.tracing import setup_tracing
+        async with mcp.session_manager.run():
+            if store is not None:
+                app.state.store = store
+                yield
+                return
+            from inside_the_game.store import Store  # needs COSMOS_* settings
+            from inside_the_game.tracing import setup_tracing
 
-        await setup_tracing()  # on in Azure; locally with TRACING=1
-        async with Store() as cosmos:
-            app.state.store = cosmos
-            yield
+            await setup_tracing()  # on in Azure; locally with TRACING=1
+            # The Analyst reaches its tools through this server's own /mcp (see analyst.ANALYST_MCP_URL).
+            os.environ.setdefault("ANALYST_MCP_URL", "http://127.0.0.1:8000/mcp")
+            async with Store() as cosmos:
+                app.state.store = cosmos
+                yield
 
     app = FastAPI(title="Inside the Game", lifespan=lifespan)
     # Trace incoming requests, so each recap run hangs under the POST that started it.
     # (Tracing is configured later, at startup; until then this records nothing.)
     FastAPIInstrumentor.instrument_app(app, excluded_urls="/api/health")
+
+    # The stats tools as an MCP server, reading matches from the same store.
+    async def mcp_load_match(match_id: str) -> Match | None:
+        return await app.state.store.get_match(match_id)
+
+    async def mcp_list_matches() -> list[dict[str, Any]]:
+        return await app.state.store.list_matches()
+
+    mcp = build_mcp_server(mcp_load_match, mcp_list_matches)
+    app.router.routes.extend(mcp.streamable_http_app().routes)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(","),

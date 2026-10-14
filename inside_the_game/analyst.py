@@ -3,6 +3,10 @@
 The agent never calculates anything. It calls the stats tools for one match
 and reports findings, each citing the tool and event_ids that prove it.
 
+When ANALYST_MCP_URL is set (the API sets it to its own /mcp), the tools come
+from the MCP server; if that fails, the Analyst falls back to the same tools
+in-process, so a recap never fails because of MCP.
+
 Usage:
     python -m inside_the_game.analyst --seed 5
 """
@@ -11,9 +15,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
+import os
 from typing import Any
 
-from agent_framework import Agent, FunctionTool, tool
+from agent_framework import Agent, AgentResponse, FunctionTool, MCPStreamableHTTPTool, tool
 from agent_framework.foundry import FoundryChatClient
 from pydantic import BaseModel, Field
 
@@ -178,9 +184,36 @@ def analyst_prompt(player: str | None = None) -> str:
     )
 
 
+def mcp_prompt(match: Match, player: str | None = None) -> str:
+    """Over MCP the tools serve every match, so the Analyst must pass this match's id to each call."""
+    return f"The match_id is {match.match_id}: pass it to every tool. {analyst_prompt(player)}"
+
+
+async def analyse_over_mcp(match: Match, url: str, player: str | None = None) -> AgentResponse:
+    """Run the Analyst with its tools from the MCP server at `url`."""
+    allowed = [name for name in TOOL_NAMES if player or name != "get_player_stats"]
+    async with MCPStreamableHTTPTool(name="stats", url=url, allowed_tools=allowed, load_prompts=False) as tools:
+        agent = Agent(
+            client=make_client(),
+            name="Analyst",
+            instructions=INSTRUCTIONS,
+            tools=tools,
+            default_options={"response_format": AnalystReport},
+        )
+        return await agent.run(mcp_prompt(match, player))
+
+
 async def analyse(match: Match, player: str | None = None) -> AnalystReport:
     """Run the Analyst on a match and return its validated report."""
-    response = await make_analyst(match, player=player).run(analyst_prompt(player))
+    url = os.environ.get("ANALYST_MCP_URL")
+    response: AgentResponse | None = None
+    if url:
+        try:
+            response = await analyse_over_mcp(match, url, player)
+        except Exception as error:  # noqa: BLE001 - the in-process tools give the same numbers
+            logging.warning("MCP tools at %s failed (%s); using the in-process tools", url, error)
+    if response is None:
+        response = await make_analyst(match, player=player).run(analyst_prompt(player))
     report = response.value
     if report is None:
         raise ValueError(f"Analyst returned no structured report: {response.text!r}")

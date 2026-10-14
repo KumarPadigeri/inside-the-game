@@ -272,6 +272,25 @@ event: done        {"minute": 91, "score": {"Home": 2, "Away": 1}}
 `kind` is `goal`, `counterattack`, `half-time` or `full-time`. `commentary` is `saved` (replaying), `none` (stats
 only) or `live` (agents commentating now).
 
+## MCP server
+
+The stats tools are also an **MCP server** (Model Context Protocol, streamable HTTP) at `/mcp` on the API:
+`list_matches`, `get_match_info`, `get_possession`, `get_shots`, `get_goals`, `get_counterattacks`,
+`get_momentum`, `get_pressing`, `get_pass_quality` and `get_player_stats`, each taking a `match_id`. It's
+read-only and serves synthetic data only.
+
+When the API runs a recap, the **Analyst agent gets its tools through this MCP server**. If MCP is unreachable,
+it falls back to the same tools in-process, so a recap never fails because of MCP.
+
+Any MCP client can connect. In VS Code (GitHub Copilot agent mode), add to `.vscode/mcp.json`:
+
+```json
+{"servers": {"inside-the-game": {"type": "http",
+  "url": "https://inside-the-game-api.ambitiousforest-f9db213d.eastus2.azurecontainerapps.io/mcp"}}}
+```
+
+Then ask, for example, "Who controlled the second half of match_002?"
+
 ## Project layout
 
 ```
@@ -284,6 +303,7 @@ inside_the_game/
   foundry.py     Foundry clients, auth      tracing.py    Azure Monitor tracing
   pregenerate.py demo recap generation      live.py       live feed: minute-by-minute stats + moments
   commentator.py Commentator agent + its Commentator/Verifier workflow
+  mcp_server.py  the stats tools as an MCP server (mounted at /mcp)
 frontend/        React + TypeScript UI (Vite)
 tests/           pytest suite (fakes for agents, no network)
 .github/         CI (tests, build, lint) and the frontend deployment
