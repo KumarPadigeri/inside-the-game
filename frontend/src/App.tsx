@@ -688,23 +688,25 @@ export default function App() {
                 <MatchGlance match={match} stats={stats} />
               )}
             </div>
-            <div className="stage-pitch">
-              <Pitch
-                events={pitchEvents}
-                replay={isLive && !liveSelected ? (live.tick?.minute ?? 0) : replay}
-                live={isLive && !liveSelected}
-              />
-              {(!isLive || liveSelected) && pitchEvents.length > 0 && (
-                <button type="button" className="replay" onClick={() => setReplay((n) => n + 1)}>
-                  ↻ Replay
-                </button>
-              )}
-              {isLive && live.status === 'idle' && !loading && match && (
-                <button type="button" className="pitch-cta" onClick={() => void startLive(false)}>
-                  <span aria-hidden="true">▶</span> Watch this match live
-                </button>
-              )}
-              {!loading && note && !(isLive && live.status === 'idle') && <p className="stage-pitch-note">{note}</p>}
+            <div className="stage-pitch-cell">
+              <div className="stage-pitch">
+                <Pitch
+                  events={pitchEvents}
+                  replay={isLive && !liveSelected ? (live.tick?.minute ?? 0) : replay}
+                  live={isLive && !liveSelected}
+                />
+                {(!isLive || liveSelected) && pitchEvents.length > 0 && (
+                  <button type="button" className="replay" onClick={() => setReplay((n) => n + 1)}>
+                    ↻ Replay
+                  </button>
+                )}
+                {isLive && live.status === 'idle' && !loading && match && (
+                  <button type="button" className="pitch-cta" onClick={() => void startLive(false)}>
+                    <span aria-hidden="true">▶</span> Watch this match live
+                  </button>
+                )}
+                {!loading && note && !(isLive && live.status === 'idle') && <p className="stage-pitch-note">{note}</p>}
+              </div>
             </div>
           </section>
           {error && <p className="error">{error}</p>}

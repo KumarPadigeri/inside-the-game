@@ -725,6 +725,7 @@ thead th {
   flex: none;
   display: grid;
   grid-template-columns: var(--columns);
+  grid-template-rows: minmax(40vh, auto); /* the pitch's minimum height; see .stage-pitch-cell */
   gap: 20px;
   align-items: stretch;
 }
@@ -743,17 +744,25 @@ thead th {
   justify-content: center;
 }
 
-/* As wide as the evidence panel below it; capped in height on short screens (the drawing stays centred). */
+/* The pitch's grid cell: the row is at least 40vh tall, and as tall as the left column when that is taller (a
+   narrow left column wraps onto more lines), so the pitch grows into the band instead of leaving a gap beside
+   it. Size containment keeps the pitch from feeding back into the row height. */
+.stage-pitch-cell {
+  container-type: size;
+  min-width: 0;
+}
+
+/* The largest pitch that fits the cell, aligned right (with the evidence panel below). It is exactly as big
+   as the drawing, so overlays (Replay, notes) sit on the pitch. */
 .stage-pitch {
   position: relative;
-  /* As wide as the pitch drawing at its capped height, so overlays (Replay, notes) sit on the pitch. */
-  width: min(100%, calc(40vh * 109 / 72));
-  justify-self: end;
+  width: min(100cqw, 100cqh * 109 / 72);
   aspect-ratio: 109 / 72;
-  max-height: 40vh;
+  margin-left: auto;
 }
 
 .stage-pitch .pitch {
+  display: block; /* no inline baseline gap under the drawing */
   width: 100%;
   height: 100%;
 }
@@ -926,10 +935,17 @@ thead th {
 
   .stage {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+
+  /* One column: the pitch is simply full width. */
+  .stage-pitch-cell {
+    container-type: normal;
+    min-height: 0;
   }
 
   .stage-pitch {
-    max-height: none;
+    width: 100%;
   }
 
   .recap-column,
