@@ -68,7 +68,7 @@ export function AgentsBadge({ running, rewrites, removed, open, onToggle }: Agen
   ]
   return (
     <button type="button" className="agents-badge" aria-expanded={open} onClick={onToggle}>
-      <span className={running ? 'agents-badge-dot running' : 'agents-badge-dot'} aria-hidden="true">
+      <span className={`agents-badge-dot ${running ? 'running' : 'verified'}`} aria-hidden="true">
         {running ? '' : '✓'}
       </span>
       {running ? 'Four agents at work…' : `Verified by 4 AI agents · ${details.join(' · ')}`}

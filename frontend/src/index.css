@@ -16,6 +16,8 @@
   --away: #c2410c;
   --goal: #d4a106;
   --danger: #b42318;
+  --success: #15803d; /* verified */
+  --on-success: #ffffff;
   --grass: #2f7d47;
   --grass-line: rgba(255, 255, 255, 0.75);
   --radius: 10px;
@@ -53,6 +55,10 @@
     --away: #f08a55;
     --goal: #f2c94c;
     --danger: #f97066;
+    --success: #4ade80;
+    --on-success: #0b1a10;
+    --success: #4ade80;
+    --on-success: #0b1a10;
     --grass: #24603a;
   }
 }
@@ -1804,6 +1810,11 @@ thead th {
   color: var(--on-accent);
   font-size: 0.7rem;
   font-weight: 700;
+}
+
+.agents-badge-dot.verified {
+  background: var(--success);
+  color: var(--on-success);
 }
 
 .agents-badge-dot.running {
