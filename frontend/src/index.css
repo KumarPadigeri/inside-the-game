@@ -173,9 +173,8 @@ h4 {
 .topbar {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: center;
+  gap: 8px 16px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 16px;
@@ -191,13 +190,33 @@ h4 {
   color: var(--muted);
 }
 
-.synthetic-note {
-  margin: 0;
+/* Phones: the buttons share the first row, the title gets a row of its own. */
+@media (max-width: 700px) {
+  .brand {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .topbar-right {
+    margin-left: auto;
+  }
+}
+
+.title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+/* "Synthetic data" next to the title (the full sentence is its tooltip). */
+.synthetic-chip {
   font-size: 0.8rem;
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 2px 10px;
+  white-space: nowrap;
 }
 
 .layout {
@@ -266,9 +285,8 @@ main {
 }
 
 .brand {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+  flex: 1;
+  min-width: 0;
 }
 
 .matches-button {
@@ -1002,44 +1020,64 @@ thead th {
   gap: 10px;
 }
 
-.theme-toggle {
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px;
-  background: var(--surface);
+/* Theme: one icon button and a small menu. */
+.theme-menu {
+  position: relative;
 }
 
-.theme-toggle button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: 0;
-  border-radius: 999px;
-  padding: 3px 9px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.8rem;
+.theme-button {
+  display: inline-grid;
+  place-items: center;
 }
 
-.theme-toggle button.active {
-  background: var(--accent);
-  color: var(--on-accent);
+.theme-menu svg {
+  width: 16px;
+  height: 16px;
 }
 
-.theme-toggle svg {
-  width: 15px;
-  height: 15px;
-}
-
-.theme-toggle button {
-  padding: 5px 8px;
-}
-
-/* At the top-right corner: open the tooltips leftwards so they stay on screen. */
-.theme-toggle [data-tooltip]::after {
-  left: auto;
+.theme-panel {
+  position: absolute;
+  top: calc(100% + 6px);
   right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+
+.theme-panel button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.theme-panel button:hover {
+  background: var(--surface-2);
+}
+
+.theme-panel button.active {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.theme-button[aria-expanded='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* ---- passcode ---- */
@@ -1601,7 +1639,6 @@ thead th {
   margin: 0 0 12px;
 }
 
-.how-button,
 .link-button {
   border: 0;
   background: transparent;
@@ -1613,7 +1650,6 @@ thead th {
   padding: 6px 4px;
 }
 
-.how-button:hover,
 .link-button:hover {
   text-decoration: underline;
 }
@@ -1629,6 +1665,32 @@ thead th {
   font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
+}
+
+/* How it works: a pill button with an info icon, like the other header controls. */
+.how-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 14px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.how-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.how-button:hover,
+.theme-button:hover {
+  border-color: var(--accent);
 }
 
 /* Personalize: one button, a small panel with every choice. */

@@ -1,4 +1,6 @@
+import { useRef, useState } from 'react'
 import { THEMES, type Theme } from '../theme'
+import { useDismiss } from '../useDismiss'
 
 const LABELS: Record<Theme, string> = { system: 'System', light: 'Light', dark: 'Dark' }
 
@@ -19,36 +21,61 @@ const PATHS: Record<Theme, string[]> = {
   dark: ['M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z'],
 }
 
-/** System / Light / Dark switch for the header: icons only, named by tooltip and screen-reader label. */
-export function ThemeToggle({ theme, onChange }: { theme: Theme; onChange: (theme: Theme) => void }) {
+function ThemeIcon({ theme }: { theme: Theme }) {
   return (
-    <div className="theme-toggle" role="radiogroup" aria-label="Colour theme">
-      {THEMES.map((t) => (
-        <button
-          type="button"
-          key={t}
-          role="radio"
-          aria-checked={t === theme}
-          aria-label={`${LABELS[t]} theme`}
-          data-tooltip={LABELS[t]}
-          className={t === theme ? 'active' : undefined}
-          onClick={() => onChange(t)}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            {PATHS[t].map((d) => (
-              <path key={d} d={d} />
-            ))}
-          </svg>
-        </button>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {PATHS[theme].map((d) => (
+        <path key={d} d={d} />
       ))}
+    </svg>
+  )
+}
+
+/** One icon button in the header (showing the current choice) with a small System / Light / Dark menu. */
+export function ThemeToggle({ theme, onChange }: { theme: Theme; onChange: (theme: Theme) => void }) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  useDismiss(open, root, () => setOpen(false))
+  return (
+    <div className="theme-menu" ref={root}>
+      <button
+        type="button"
+        className="icon-button theme-button"
+        aria-label={`Colour theme: ${LABELS[theme]}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <ThemeIcon theme={theme} />
+      </button>
+      {open && (
+        <div className="theme-panel" role="menu" aria-label="Colour theme">
+          {THEMES.map((t) => (
+            <button
+              type="button"
+              key={t}
+              role="menuitemradio"
+              aria-checked={t === theme}
+              className={t === theme ? 'active' : undefined}
+              onClick={() => {
+                onChange(t)
+                setOpen(false)
+              }}
+            >
+              <ThemeIcon theme={t} />
+              {LABELS[t]}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

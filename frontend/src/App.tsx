@@ -435,24 +435,38 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
+        <button
+          type="button"
+          className="matches-button"
+          aria-expanded={navOpen}
+          aria-controls="match-list"
+          onClick={() => setNavOpen(true)}
+        >
+          <span aria-hidden="true">☰</span> Matches
+        </button>
         <div className="brand">
-          <button
-            type="button"
-            className="matches-button"
-            aria-expanded={navOpen}
-            aria-controls="match-list"
-            onClick={() => setNavOpen(true)}
-          >
-            <span aria-hidden="true">☰</span> Matches
-          </button>
-          <div>
+          <div className="title-row">
             <h1>Inside the Game</h1>
-            <p className="tagline">AI football recaps where every sentence shows its proof.</p>
+            <span className="synthetic-chip" title="All teams, players and matches are synthetic.">
+              Synthetic data
+            </span>
           </div>
+          <p className="tagline">AI football recaps where every sentence shows its proof.</p>
         </div>
         <div className="topbar-right">
-          <p className="synthetic-note">All teams, players and matches are synthetic.</p>
           <button type="button" className="how-button" onClick={() => setHowOpen(true)}>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 11v5" />
+              <path d="M12 7.5v.01" />
+            </svg>
             How it works
           </button>
           <ThemeToggle theme={theme} onChange={chooseTheme} />

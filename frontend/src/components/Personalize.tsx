@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { LANGUAGES, STYLES, type Language, type Match, type Style } from '../api'
 import { playerOptions } from '../focus'
 import { PERSONAS } from '../personas'
 import { PersonaIcon } from './PersonaIcon'
+import { useDismiss } from '../useDismiss'
 
 interface PersonalizeProps {
   match: Match | null
@@ -41,17 +42,7 @@ export function Personalize(props: PersonalizeProps) {
   const root = useRef<HTMLDivElement>(null)
 
   // Close on a click outside the panel, or on Escape.
-  useEffect(() => {
-    if (!open) return
-    const onPointer = (e: PointerEvent) => !root.current?.contains(e.target as Node) && setOpen(false)
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
-    document.addEventListener('pointerdown', onPointer)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('pointerdown', onPointer)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  useDismiss(open, root, () => setOpen(false))
 
   return (
     <div className="personalize" ref={root}>
