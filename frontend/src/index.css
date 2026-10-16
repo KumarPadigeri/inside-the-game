@@ -1782,6 +1782,18 @@ thead th {
   cursor: pointer;
 }
 
+/* Open (its panel is showing): looks selected, like the chosen persona. */
+.agents-badge[aria-expanded='true'],
+.personalize-button[aria-expanded='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.agents-badge:hover,
+.personalize-button:hover {
+  border-color: var(--accent);
+}
+
 .agents-badge-dot {
   display: inline-grid;
   place-items: center;
